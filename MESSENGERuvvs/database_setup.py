@@ -17,9 +17,3 @@ def messenger_database_setup():
     datafiles = glob.glob(datapath+'/UVVS*sql')
     for dfile in datafiles:
         os.system(f'psql -d {database} -f {dfile}')
-
-if __name__ == '__main__':
-    # Load MESSENGER data into database
-    cfmes = input('Load the MESSENGER data? (y/n) ')
-    if cfmes.lower() in ('y', 'yes'):
-        messenger_database_setup()
