@@ -6,4 +6,10 @@ from .database_setup import messenger_database_setup
 name = 'MESSENGERuvvs'
 __author__ = 'Matthew Burger'
 __email__ = 'mburger@stsci.edu'
-__version__ = '1.0.3'
+__version__ = '1.0.4'
+
+
+try:
+    messenger_database_setup(database='thesolarsystemmb')
+except:
+    print('Database setup failed')

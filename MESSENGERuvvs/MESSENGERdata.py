@@ -18,8 +18,6 @@ from astropy.visualization import PercentileInterval
 from solarsystemMB import SSObject, planet_geometry
 
 
-mercury = SSObject('Mercury')
-
 def get_database():
     configfile = os.path.join(os.environ['HOME'], '.nexoclom')
     config = {}
@@ -38,6 +36,7 @@ def get_database():
 
 def merc_year(datatime=None, initialize=False):
     '''Insert/read start date for each Mercury year from database.'''
+    mercury = SSObject('Mercury')
 
     tstart = Time('2011-03-18T00:00:00', format='isot', scale='utc')
     tend = Time('2015-04-30T23:59:59', format='isot', scale='utc')
@@ -133,7 +132,7 @@ class MESSENGERdata():
                 self.data = None
 
     @staticmethod
-    def initialize(datapath):
+    def initialize(datapath, database='thesolarsystemmb'):
         '''Convert raw IDL sav files to pickles'''
 
         # Add to the database
