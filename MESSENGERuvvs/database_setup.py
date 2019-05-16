@@ -4,6 +4,14 @@ import psycopg2
 
 
 def messenger_database_setup(force=False, database='thesolarsystemmb'):
+    # Verify database is running
+    status = os.popen('pg_ctl status').read()
+    if 'no server running' in status:
+        os.system('pg_ctl -D $HOME/.postgres/main/ -l '
+                  '$HOME/.postgres/logfile start')
+    else:
+        pass
+    
     # Read the configuration file
     configfile = os.path.join(os.environ['HOME'], '.nexoclom')
     config = {}
@@ -22,12 +30,12 @@ def messenger_database_setup(force=False, database='thesolarsystemmb'):
         else:
             datapath = input('What is the path to the MESSENGER data? ')
             with open(configfile, 'a') as f:
-                f.write(f'datapath = {datapath}')
+                f.write(f'datapath = {datapath}\n')
     else:
         datapath = input('What is the path to the MESSENGER data? ')
         with open(configfile, 'w') as f:
-            f.write(f'datapath = {datapath}')
-            f.write(f'database = {database}')
+            f.write(f'datapath = {datapath}\n')
+            f.write(f'database = {database}\n')
 
     # Create MESSENGER database if necessary
     with psycopg2.connect(host='localhost', database='postgres') as con:
@@ -50,7 +58,7 @@ def messenger_database_setup(force=False, database='thesolarsystemmb'):
         tables = [r[0] for r in cur.fetchall()]
 
         mestables = ['capointing', 'cauvvsdata', 'mesmercyear', 'mgpointing',
-                  'mguvvsdata', 'napointing', 'nauvvsdata']
+                     'mguvvsdata', 'napointing', 'nauvvsdata']
         there = [m in tables for m in mestables]
 
         if (False in there) or (force):
