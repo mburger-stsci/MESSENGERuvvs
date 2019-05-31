@@ -94,16 +94,21 @@ class MESSENGERdata():
         Species is required because each species is in different tables
         At least one SQL-formatted comparison is required. '''
 
-        if (species is None):
-            species = ''
         allspecies = ['Na', 'Ca', 'Mg']
-        if species not in allspecies:
+        if (species is None):
+            # Return an empty object
+            self.species = None
+            self.frame = None
+            self.query = None
+            self.data = None
+        elif species not in allspecies:
+            # Return list of valid species
             print(f"Valid species are {', '.join(allspecies)}")
             return None
-
-        database = get_database()
-        con = psycopg2.connect(database=database)
-        if comparisons is None:
+        elif comparisons is None:
+            # Return list of queryable fields
+            database = get_database()
+            con = psycopg2.connect(database=database)
             columns = pd.read_sql(
                 f'''SELECT * from {species}uvvsdata, {species}pointing
                     WHERE 1=2''', con)
@@ -112,6 +117,9 @@ class MESSENGERdata():
                 print(f'\t{col}')
             return None
         else:
+            # Run the query and try to make the object
+            database = get_database()
+            con = psycopg2.connect(database=database)
             query = f'''SELECT * from {species}uvvsdata, {species}pointing
                         WHERE unum=pnum and {comparisons}
                         ORDER BY unum'''
@@ -121,14 +129,18 @@ class MESSENGERdata():
                 print(query)
                 assert 0, 'Problem with comparisons given.'
 
-            if (len(data) > 0):
+            if len(data) > 0:
                 self.species = species
                 self.frame = data.frame[0]
+                self.query = comparisons
                 data.drop(['species', 'frame'], inplace=True, axis=1)
                 self.data = data
             else:
                 print(query)
                 print('No data found')
+                self.species = species
+                self.query = comparisons
+                self.frame = None
                 self.data = None
 
     @staticmethod
@@ -372,16 +384,52 @@ class MESSENGERdata():
                                     '{dpoint.slit}')''')
 
     def __str__(self):
-        for a in self.__dict__:
-            try:
-                ll = self.__dict__[a].shape
-            except:
-                ll = ''
-            print('{}\t{}\t{}'.format(a, type(self.__dict__[a]), ll))
-        return ''
+        result = (f'Species: {self.species}\n'
+                  f'Query: {self.query}\n'
+                  f'Frame: {self.frame}\n'
+                  f'Object contains {len(self)} spectra.')
+        return result
+
+    def __repr__(self):
+        result = ('MESSENGER UVVS Data Object\n'
+                  f'Species: {self.species}\n'
+                  f'Query: {self.query}\n'
+                  f'Frame: {self.frame}\n'
+                  f'Object contains {len(self)} spectra.')
+        return result
 
     def __len__(self):
-        return len(self.data)
+        try:
+            return len(self.data)
+        except:
+            return 0
+
+    def __getitem__(self, q_):
+        if isinstance(q_, int):
+            q = slice(q_, q_+1)
+        elif isinstance(q_, slice):
+            q = q_
+        else:
+            raise TypeError
+
+        new = MESSENGERdata()
+        new.species = self.species
+        new.frame = self.frame
+        new.query = self.query
+        new.data = self.data.iloc[q].copy()
+        try:
+            new.modelstrength = self.modelstrength
+        except:
+            pass
+
+        return new
+
+    def __iter__(self):
+        for i in range(len(self.data)):
+            yield self[i]
+
+    def keys(self):
+        return data.__dict__.keys()
 
     def set_frame(self, frame=None):
         '''Convert between MSO and Model frames.
@@ -389,7 +437,6 @@ class MESSENGERdata():
         More frames could be added if necessary.
         If Frame is not specified, flips between MSO and Model.
         '''
-
         if (frame is None) and (self.frame == 'MSO'):
             frame = 'Model'
         elif (frame is None) and (self.frame == 'Model'):
@@ -405,21 +452,23 @@ class MESSENGERdata():
             pass
         elif (self.frame == 'MSO') and (frame == 'Model'):
             # Convert from MSO to Model
-            self.data.x, self.data.y = self.data.y, -self.data.x
-            self.data.xbore, self.data.ybore = (self.data.ybore,
-                                                -self.data.xbore)
+            self.data.x, self.data.y = self.data.y.copy(), -self.data.x.copy()
+            self.data.xbore, self.data.ybore = (self.data.ybore.copy(),
+                                                -self.data.xbore.copy())
             # self.data.xcorner, self.data.ycorner = (self.data.ycorner,
             #                                         -self.data.xcorner)
-            self.data.xtan, self.data.ytan = self.data.ytan, -self.data.xtan
-            self.data.frame = 'Model'
-        elif (self.data.frame == 'Model') and (frame == 'MSO'):
-            self.data.x, self.data.y = -self.data.y, self.data.x
-            self.data.xbore, self.data.ybore = (-self.data.ybore,
-                                                self.data.xbore)
+            self.data.xtan, self.data.ytan = (self.data.ytan.copy(),
+                                              -self.data.xtan.copy())
+            self.frame = 'Model'
+        elif (self.frame == 'Model') and (frame == 'MSO'):
+            self.data.x, self.data.y = -self.data.y.copy(), self.data.x.copy()
+            self.data.xbore, self.data.ybore = (-self.data.ybore.copy(),
+                                                self.data.xbore.copy())
             # self.data.xcorner, self.data.ycorner = (-self.data.ycorner,
             #                                         self.data.xcorner)
-            self.data.xtan, self.data.ytan = -self.data.ytan, self.data.xtan
-            self.data.frame = 'MSO'
+            self.data.xtan, self.data.ytan = (-self.data.ytan.copy(),
+                                              self.data.xtan.copy())
+            self.frame = 'MSO'
         else:
             assert 0, 'You somehow picked a bad combination.'
 
@@ -450,7 +499,8 @@ class MESSENGERdata():
         self.inputs = inputs
         self.set_frame('Model')
         self.modelresult = LOSResult(inputs, self.data, quantity,
-                                     dphi=dphi, filenames=filenames)
+                                     dphi=dphi, filenames=filenames,
+                                     overwrite=overwrite)
         self.data['model'] = self.modelresult.radiance/1e3 # Convert to kR
 
         interval = PercentileInterval(50)
@@ -462,49 +512,9 @@ class MESSENGERdata():
         m_data = np.mean(self.data.radiance[mask])
         m_model = np.mean(self.data.model[mask])
         self.modelstrength = m_data/m_model * strunit * strunit
-
         self.data.model = self.data.model * self.modelstrength.value
+
+        print(self.modelstrength)
 
         # Put the old TAA back in.
         inputs.geometry.taa = oldtaa
-
-    # def subset(self, q):
-    #     ''' Reduces the object to a subset of the object.'''
-    #
-    #     self.UTC = self.UTC[q]
-    #     self.orbit = self.orbit[q]
-    #     self.mercyear = self.mercyear[q]
-    #     self.taa = self.taa[q]
-    #     self.rmerc = self.rmerc[q]
-    #     self.drdt = self.drdt[q]
-    #     self.subslong = self.subslong[q]
-    #     self.g = self.g[q]
-    #     self.radiance = self.radiance[q]
-    #     self.sigma = self.sigma[q]
-    #     self.x = self.x[q]
-    #     self.y = self.y[q]
-    #     self.z = self.z[q]
-    #     self.xbore = self.xbore[q]
-    #     self.ybore = self.ybore[q]
-    #     self.zbore = self.zbore[q]
-    #     self.xcorner = self.xcorner[q,:]
-    #     self.ycorner = self.ycorner[q,:]
-    #     self.zcorner = self.zcorner[q,:]
-    #     self.obstype = self.obstype[q]
-    #     self.obstype_num = self.obstype_num[q]
-    #     self.xtan = self.xtan[q]
-    #     self.ytan = self.ytan[q]
-    #     self.ztan = self.ztan[q]
-    #     self.rtan = self.rtan[q]
-    #     self.alttan = self.alttan[q,:]
-    #     self.minalt = self.minalt[q]
-    #     self.longtan = self.longtan[q,:]
-    #     self.lattan = self.lattan[q,:]
-    #     self.loctimetan = self.loctimetan[q]
-    #     self.slit = self.slit[q]
-    #     self.wavelength = self.wavelength[q,:]
-    #     self.spectra = self.spectra[q,:]
-    #     self.raw = self.raw[q,:]
-    #     self.corrected = self.corrected[q,:]
-    #     self.dark = self.dark[q,:]
-    #     self.solarfit = self.solarfit[q,:]
