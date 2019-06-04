@@ -1,9 +1,8 @@
-''' MESSENGER UVVS data class
+"""MESSENGER UVVS data class
 Convert MESSENGER data into a useable class
 *_temp.pickle are straight pickled versions of the IDL summmary files
 Creates files that match my previous IDL summary files
-This needs to be rerun if more methods are added to the class
-'''
+This needs to be rerun if more methods are added to the class"""
 import numpy as np
 import os
 import sys
@@ -35,7 +34,7 @@ def get_database():
 
 
 def merc_year(datatime=None, initialize=False):
-    '''Insert/read start date for each Mercury year from database.'''
+    """Insert/read start date for each Mercury year from database."""
     mercury = SSObject('Mercury')
 
     tstart = Time('2011-03-18T00:00:00', format='isot', scale='utc')
@@ -87,15 +86,15 @@ def merc_year(datatime=None, initialize=False):
     else:
         return None
 
-class MESSENGERdata():
+class MESSENGERdata:
     def __init__(self, species=None, comparisons=None):
-        '''Retrieve MESSENGER data from database
+        """Retrieve MESSENGER data from database
 
         Species is required because each species is in different tables
-        At least one SQL-formatted comparison is required. '''
+        At least one SQL-formatted comparison is required."""
 
         allspecies = ['Na', 'Ca', 'Mg']
-        if (species is None):
+        if species is None:
             # Return an empty object
             self.species = None
             self.frame = None
@@ -104,7 +103,8 @@ class MESSENGERdata():
         elif species not in allspecies:
             # Return list of valid species
             print(f"Valid species are {', '.join(allspecies)}")
-            return None
+            self = None
+
         elif comparisons is None:
             # Return list of queryable fields
             database = get_database()
@@ -115,7 +115,7 @@ class MESSENGERdata():
             print('Available fields are:')
             for col in columns.columns:
                 print(f'\t{col}')
-            return None
+            self = None
         else:
             # Run the query and try to make the object
             database = get_database()
@@ -145,7 +145,8 @@ class MESSENGERdata():
 
     @staticmethod
     def initialize(datapath, database='thesolarsystemmb'):
-        '''Convert raw IDL sav files to pickles'''
+        """Convert raw IDL sav files to pickles"""
+        mercury = SSObject('Mercury')
 
         # Add to the database
         database = get_database()
@@ -207,23 +208,23 @@ class MESSENGERdata():
         savfiles = glob.glob(datapath+'/*.sav')
         savfiles = sorted(savfiles)
         for oldfile in savfiles:
-            realfile = oldfile.replace('.sav', '_temp.pkl')
+            # realfile = oldfile.replace('.sav', '_temp.pkl')
             newfile = oldfile.replace('.sav', '.pkl')
             print('{}\n{}\n***'.format(oldfile, newfile))
-            #data = io.readsav(oldfile, python_dict=True)
-            data = pickle.load(open(realfile, 'rb'))
+            data = io.readsav(oldfile, python_dict=True)
+            # data = pickle.load(open(realfile, 'rb'))
 
             kR = u.def_unit('kR', 1e3*u.R)
             Rmerc = u.def_unit('R_Mercury', mercury.radius)
             nm = u.def_unit('nm', 1e-9*u.m)
 
             npts = len(data['orb_num'])
-            species = os.path.basename(oldfile).split('.')[0]
+            species = os.path.basename(oldfile)[0:2].lower()
 
             # Determine UT for each spectrum
             t_iso = ['{}:{}:{}'.format('20' + time[0:2].decode('utf-8'),
                                        time[2:5].decode('utf-8'),
-                                   time[6:].decode('utf-8'))
+                                       time[6:].decode('utf-8'))
                      for time in data['step_utc_time']]
             UTC = Time(t_iso, format='yday')
 
@@ -247,7 +248,7 @@ class MESSENGERdata():
             corn3 = np.ndarray((npts, 3))
             for i in np.arange(npts):
                 xyz[i,:] = np.dot(data['mso_rotation_matrix'][i,:,:],
-                             data['planet_sc_vector_tg'][i,:])/mercury.radius.value
+                                  data['planet_sc_vector_tg'][i,:])/mercury.radius.value
                 bore[i,:] = np.dot(data['mso_rotation_matrix'][i,:,:],
                                  data['boresight_unit_vector_center_tg'][i,:])
                 corn0[i,:] = np.dot(data['mso_rotation_matrix'][i,:,:],
@@ -281,7 +282,10 @@ class MESSENGERdata():
             spectra = data[species.lower()+'_rad_kr']*kR
             wavelength = data['wavelength']*nm
             raw = data['orig']*u.ct
-            corrected = data['corr']*u.ct
+            try:
+                corrected = data['fully_corr_cr']*u.ct
+            except:
+                corrected = data['corr']*u.ct
             dark = data['dark']*u.ct
             solarfit = data['sol_fit']*u.ct
 
@@ -332,6 +336,7 @@ class MESSENGERdata():
 
             spectra = {'spectra': spectra,
                        'wavelength': wavelength,
+                       'raw': raw,
                        'corrected': corrected,
                        'dark': dark,
                        'solarfit': solarfit}
@@ -429,14 +434,15 @@ class MESSENGERdata():
             yield self[i]
 
     def keys(self):
-        return data.__dict__.keys()
+        keys = list(self.__dict__.keys())
+        keys.extend([f'data.{col}' for col in self.data.columns])
+        return keys
 
     def set_frame(self, frame=None):
-        '''Convert between MSO and Model frames.
+        """Convert between MSO and Model frames.
 
         More frames could be added if necessary.
-        If Frame is not specified, flips between MSO and Model.
-        '''
+        If Frame is not specified, flips between MSO and Model."""
         if (frame is None) and (self.frame == 'MSO'):
             frame = 'Model'
         elif (frame is None) and (self.frame == 'Model'):
