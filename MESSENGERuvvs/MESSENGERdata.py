@@ -100,6 +100,7 @@ class MESSENGERdata:
             self.frame = None
             self.query = None
             self.data = None
+            self.taa = None
         elif species not in allspecies:
             # Return list of valid species
             print(f"Valid species are {', '.join(allspecies)}")
@@ -135,6 +136,7 @@ class MESSENGERdata:
                 self.query = comparisons
                 data.drop(['species', 'frame'], inplace=True, axis=1)
                 self.data = data
+                self.taa = np.median(data.taa)
             else:
                 print(query)
                 print('No data found')
@@ -142,6 +144,7 @@ class MESSENGERdata:
                 self.query = comparisons
                 self.frame = None
                 self.data = None
+                self.taa
 
     @staticmethod
     def initialize(datapath, database='thesolarsystemmb'):
@@ -421,6 +424,7 @@ class MESSENGERdata:
         new.species = self.species
         new.frame = self.frame
         new.query = self.query
+        new.taa = self.taa
         new.data = self.data.iloc[q].copy()
         try:
             new.modelstrength = self.modelstrength
