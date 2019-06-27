@@ -15,22 +15,7 @@ from astropy.time import Time
 from astropy import units as u
 from astropy.visualization import PercentileInterval
 from solarsystemMB import SSObject, planet_geometry
-
-
-def get_database():
-    configfile = os.path.join(os.environ['HOME'], '.nexoclom')
-    config = {}
-    if os.path.isfile(configfile):
-        for line in open(configfile, 'r').readlines():
-            key, value = line.split('=')
-            if key.strip() == 'database':
-                database = value.strip()
-            else:
-                pass
-    else:
-        database = None
-
-    return database
+from .database_setup import database_connect
 
 
 def merc_year(datatime=None, initialize=False):
@@ -40,9 +25,6 @@ def merc_year(datatime=None, initialize=False):
     tstart = Time('2011-03-18T00:00:00', format='isot', scale='utc')
     tend = Time('2015-04-30T23:59:59', format='isot', scale='utc')
 
-    database = get_database()
-    con = psycopg2.connect(database=database)
-    con.autocommit = True
     if initialize:
         times_ = np.arange(tstart.jd, tend.jd)
         times = [Time(t, format='jd', scale='utc') for t in times_]
@@ -60,23 +42,26 @@ def merc_year(datatime=None, initialize=False):
                 print(c.iso)
         endyr = [*styear[1:], tend]
 
-        cur = con.cursor()
-        try:
-            cur.execute('DROP table MESmercyear')
-        except:
-            pass
-        cur.execute('''CREATE table MESmercyear
-                        (yrnum int PRIMARY KEY,
-                         yrstart timestamp,
-                         yrend timestamp)''')
-        for i,d in enumerate(zip(styear, endyr)):
-            cur.execute(f'''INSERT into MESmercyear
-                            values ({i}, '{d[0].iso}', '{d[1].iso}')''')
+        with database_connect() as con:
+            cur = con.cursor()
+            try:
+                cur.execute('DROP table MESmercyear')
+            except:
+                pass
+            cur.execute('''CREATE table MESmercyear
+                            (yrnum int PRIMARY KEY,
+                             yrstart timestamp,
+                             yrend timestamp)''')
+            for i,d in enumerate(zip(styear, endyr)):
+                cur.execute(f'''INSERT into MESmercyear
+                                values ({i}, '{d[0].iso}', '{d[1].iso}')''')
     else:
         pass
 
     if datatime is not None:
-        yrnum = pd.read_sql('''SELECT * from MESmercyear''', con)
+        with database_connect() as con:
+            yrnum = pd.read_sql('''SELECT * from MESmercyear''', con)
+
         myear = np.ndarray(len(datatime), dtype=int)
         for i,yr in yrnum.iterrows():
             q = (datatime > yr.yrstart) & (datatime < yr.yrend)
@@ -104,28 +89,35 @@ class MESSENGERdata:
         elif species not in allspecies:
             # Return list of valid species
             print(f"Valid species are {', '.join(allspecies)}")
-            self = None
-
+            # Return an empty object
+            self.species = None
+            self.frame = None
+            self.query = None
+            self.data = None
+            self.taa = None
         elif comparisons is None:
             # Return list of queryable fields
-            database = get_database()
-            con = psycopg2.connect(database=database)
-            columns = pd.read_sql(
-                f'''SELECT * from {species}uvvsdata, {species}pointing
-                    WHERE 1=2''', con)
+            with database_connect() as con:
+                columns = pd.read_sql(
+                    f'''SELECT * from {species}uvvsdata, {species}pointing
+                        WHERE 1=2''', con)
             print('Available fields are:')
             for col in columns.columns:
                 print(f'\t{col}')
-            self = None
+            # Return an empty object
+            self.species = None
+            self.frame = None
+            self.query = None
+            self.data = None
+            self.taa = None
         else:
             # Run the query and try to make the object
-            database = get_database()
-            con = psycopg2.connect(database=database)
             query = f'''SELECT * from {species}uvvsdata, {species}pointing
                         WHERE unum=pnum and {comparisons}
                         ORDER BY unum'''
             try:
-                data = pd.read_sql(query, con)
+                with database_connect() as con:
+                    data = pd.read_sql(query, con)
             except:
                 print(query)
                 assert 0, 'Problem with comparisons given.'
@@ -152,11 +144,8 @@ class MESSENGERdata:
         mercury = SSObject('Mercury')
 
         # Add to the database
-        database = get_database()
-        con = psycopg2.connect(database=database)
-        con.autocommit = True
+        con = database_connect()
         cur = con.cursor()
-
         try:
             cur.execute('DROP table nauvvsdata')
             cur.execute('DROP table napointing')
@@ -206,7 +195,7 @@ class MESSENGERdata:
                                lattan float,
                                loctimetan float,
                                slit text)''')
-        # Not including slit corners right now
+            # Not including slit corners right now
 
         savfiles = glob.glob(datapath+'/*.sav')
         savfiles = sorted(savfiles)
@@ -390,6 +379,7 @@ class MESSENGERdata:
                                     {dpoint.lattan},
                                     {dpoint.loctimetan},
                                     '{dpoint.slit}')''')
+        con.close()
 
     def __str__(self):
         result = (f'Species: {self.species}\n'

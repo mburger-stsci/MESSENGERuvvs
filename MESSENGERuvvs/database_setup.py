@@ -3,16 +3,14 @@ import glob
 import psycopg2
 
 
-def messenger_database_setup(force=False, database='thesolarsystemmb'):
-    # Verify database is running
-    status = os.popen('pg_ctl status').read()
-    if 'no server running' in status:
-        os.system('pg_ctl -D $HOME/.postgres/main/ -l '
-                  '$HOME/.postgres/logfile start')
-    else:
-        pass
-    
-    # Read the configuration file
+def database_connect(database=None, port=None, return_con=True):
+    """Wrapper for psycopg2.connect() that determines which database and port to use.
+
+    :param database: Default = None to use value from config file
+    :param port: Default = None to use value from config file
+    :param return_con: False to return database name and port instead of connection
+    :return: Database connection with autocommit = True unless return_con = False
+    """
     configfile = os.path.join(os.environ['HOME'], '.nexoclom')
     config = {}
     if os.path.isfile(configfile):
@@ -20,26 +18,70 @@ def messenger_database_setup(force=False, database='thesolarsystemmb'):
             key, value = line.split('=')
             config[key.strip()] = value.strip()
 
-        if 'database' in config:
-             database = config['database']
+        if (database is None) and ('database' in config):
+            database = config['database']
         else:
             pass
 
-        if 'datapath' in config:
-            datapath = config['datapath']
+        if (port is None) and ('port' in config):
+            port = int(config['port'])
         else:
-            datapath = input('What is the path to the MESSENGER data? ')
-            with open(configfile, 'a') as f:
-                f.write(f'datapath = {datapath}\n')
+            pass
     else:
+        pass
+
+    if database is None:
+        database = 'thesolarsystemmb'
+    else:
+        pass
+
+    if port is None:
+        port = 5432
+    else:
+        pass
+
+    if return_con:
+        con = psycopg2.connect(database=database, port=port)
+        con.autocommit = True
+
+        return con
+    else:
+        return database, port
+
+def messenger_database_setup(force=False):
+    # Read in current config file if it exists
+    configfile = os.path.join(os.environ['HOME'], '.nexoclom')
+    datapath = None
+    if os.path.isfile(configfile):
+        for line in open(configfile, 'r').readlines():
+            key, value = line.split('=')
+            if key.strip() == 'datapath':
+                datapath = value.strip()
+            else:
+                pass
+    else:
+        pass
+
+    if datapath is None:
         datapath = input('What is the path to the MESSENGER data? ')
-        with open(configfile, 'w') as f:
+        with open(configfile, 'a') as f:
             f.write(f'datapath = {datapath}\n')
-            f.write(f'database = {database}\n')
+    else:
+        pass
+
+    # Get database name and port
+    database, port = database_connect(return_con=False)
+
+    # Verify database is running
+    status = os.popen('pg_ctl status').read()
+    if 'no server running' in status:
+        os.system(f'pg_ctl -D $HOME/.postgres/main/ -p {port}'
+                  '-l $HOME/.postgres/logfile start')
+    else:
+        pass
 
     # Create MESSENGER database if necessary
-    with psycopg2.connect(host='localhost', database='postgres') as con:
-        con.autocommit = True
+    with database_connect(database='postgres') as con:
         cur = con.cursor()
         cur.execute('select datname from pg_database')
         dbs = [r[0] for r in cur.fetchall()]
@@ -51,8 +93,7 @@ def messenger_database_setup(force=False, database='thesolarsystemmb'):
             pass
 
     # Create the MESSENGER tables if necessary
-    with psycopg2.connect(database=database) as con:
-        con.autocommit = True
+    with database_connect() as con:
         cur = con.cursor()
         cur.execute('select table_name from information_schema.tables')
         tables = [r[0] for r in cur.fetchall()]
@@ -73,6 +114,6 @@ def messenger_database_setup(force=False, database='thesolarsystemmb'):
             datafiles = glob.glob(datapath+'/UVVS*sql')
             for dfile in datafiles:
                 print(f'Loading {os.path.basename(dfile)}')
-                os.system(f'psql -d {database} -f {dfile}')
+                os.system(f'psql -d {database} -p {port} -f {dfile}')
         else:
             pass
