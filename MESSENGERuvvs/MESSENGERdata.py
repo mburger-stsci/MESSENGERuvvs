@@ -5,11 +5,11 @@ Creates files that match my previous IDL summary files
 This needs to be rerun if more methods are added to the class"""
 import numpy as np
 import os
-import sys
 import glob
 import pickle
 import pandas as pd
-import psycopg2
+import bokeh.plotting as plt
+from bokeh.models import HoverTool
 from scipy import io
 from astropy.time import Time
 from astropy import units as u
@@ -136,7 +136,7 @@ class MESSENGERdata:
                 self.query = comparisons
                 self.frame = None
                 self.data = None
-                self.taa
+                self.taa = None
 
     @staticmethod
     def initialize(datapath, database='thesolarsystemmb'):
@@ -518,3 +518,57 @@ class MESSENGERdata:
 
         # Put the old TAA back in.
         inputs.geometry.taa = oldtaa
+
+    def plot(self, filename=None, show=True, **kwargs):
+        if filename is not None:
+            if not filename.endswith('.html'):
+                filename += '.html'
+            else:
+                pass
+            plt.output_file(filename)
+        else:
+            pass
+
+        # Format the date correction
+        self.data['utcstr'] = self.data['utc'].apply(lambda x: x.isoformat()[0:19])
+
+        # Put the dataframe in a useable form
+        source = plt.ColumnDataSource(self.data)
+
+        # Make the figure
+        fig = plt.figure(plot_width=1200, plot_height=800, x_axis_type='datetime',
+                         title=f'{self.species}, {self.query}', x_axis_label='UTC',
+                         y_axis_label='Radiance (kR)',
+                         tools=['pan', 'box_zoom', 'reset'])
+
+        # plot the data
+        dplot = fig.circle(x='utc', y='radiance', size=7, color='black',
+                           legend='Data', hover_color='white', source=source)
+        datahover = HoverTool(tooltips=[('index', '$index'), ('UTC', '@utcstr'),
+                                        ('Radiance', '@radiance{0.2f} kR'),
+                                        ('Model', '@model{0.2f} kR')],
+                              renderers=[dplot])
+        fig.add_tools(datahover)
+
+        # Plot the model
+        fig.line(self.data.utc, self.data.model, color='red', legend='Model', )
+        fig.circle(self.data.utc, self.data.model, color='red', size=7,
+                   legend='Model', )
+
+        # Labels, etc.
+        fig.title.align = 'center'
+        fig.title.text_font_size = '16pt'
+        fig.axis.axis_label_text_font_size = '16pt'
+        fig.axis.major_label_text_font_size = '16pt'
+        fig.legend.label_text_font_size = '16pt'
+        fig.legend.click_policy = 'hide'
+
+        if filename is not None:
+            plt.output_file('test_plot.html')
+            plt.save(fig)
+        else:
+            pass
+
+        if show:
+            plt.show(fig)
+
