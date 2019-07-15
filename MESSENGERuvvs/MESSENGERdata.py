@@ -127,6 +127,7 @@ class MESSENGERdata:
                 self.query = comparisons
                 data.drop(['species', 'frame'], inplace=True, axis=1)
                 self.data = data
+                self.data.set_index('unum', inplace=True)
                 self.taa = np.median(data.taa)
             else:
                 print(query)
@@ -608,4 +609,46 @@ class MESSENGERdata:
 
         if show:
             plt.show(fig)
+
+    def export(self, filename, columns=['utc', 'radiance']):
+        columns_ = columns.copy()
+        if 'modelkey' in self.keys():
+            columns_.extend(self.modelkey)
+        else: pass
+
+        # Make sure radiance is in there
+        if 'radiance' not in columns_:
+            columns_.append('radiance')
+        else:
+            pass
+
+        # Make sure UTC is in there
+        if 'utc' not in columns_:
+            columns_.append('utc')
+        else:
+            pass
+
+        if len(columns_) != len(set(columns_)):
+            columns_ = list(set(columns_))
+        else:
+            pass
+
+        for col in columns_:
+            if col not in self.data.columns:
+                columns_.remove(col)
+            else:
+                pass
+
+        subset = self.data[columns_]
+        if filename.endswith('.csv'):
+            subset.to_csv(filename)
+        elif filename.endswith('.pkl'):
+            subset.to_pickle(filename)
+        elif filename.endswith('.html'):
+            subset.to_html(filename)
+        elif filename.endswith('.tex'):
+            subset.to_latex(filename)
+        else:
+            print('Valid output formats = csv, pkl, html, tex')
+
 
