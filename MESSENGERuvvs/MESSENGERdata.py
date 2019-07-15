@@ -10,6 +10,7 @@ import pickle
 import pandas as pd
 import bokeh.plotting as plt
 from bokeh.models import HoverTool
+from bokeh.palettes import Set1
 from scipy import io
 from astropy.time import Time
 from astropy import units as u
@@ -20,8 +21,6 @@ from .database_setup import database_connect
 
 def merc_year(datatime=None, initialize=False):
     """Insert/read start date for each Mercury year from database."""
-    mercury = SSObject('Mercury')
-
     tstart = Time('2011-03-18T00:00:00', format='isot', scale='utc')
     tend = Time('2015-04-30T23:59:59', format='isot', scale='utc')
 
@@ -29,7 +28,7 @@ def merc_year(datatime=None, initialize=False):
         times_ = np.arange(tstart.jd, tend.jd)
         times = [Time(t, format='jd', scale='utc') for t in times_]
 
-        taa = np.ndarray(len(times))*u.rad
+        taa = np.ndarray((len(times),))*u.rad
         for i,t in enumerate(times):
             time = Time(t, format='jd', scale='utc')
             geo = planet_geometry(time, 'Mercury')
@@ -62,7 +61,7 @@ def merc_year(datatime=None, initialize=False):
         with database_connect() as con:
             yrnum = pd.read_sql('''SELECT * from MESmercyear''', con)
 
-        myear = np.ndarray(len(datatime), dtype=int)
+        myear = np.ndarray((len(datatime),), dtype=int)
         for i,yr in yrnum.iterrows():
             q = (datatime > yr.yrstart) & (datatime < yr.yrend)
             myear[q] = yr.yrnum
@@ -71,13 +70,13 @@ def merc_year(datatime=None, initialize=False):
     else:
         return None
 
+
 class MESSENGERdata:
     def __init__(self, species=None, comparisons=None):
         """Retrieve MESSENGER data from database
 
         Species is required because each species is in different tables
         At least one SQL-formatted comparison is required."""
-
         allspecies = ['Na', 'Ca', 'Mg']
         if species is None:
             # Return an empty object
@@ -473,9 +472,7 @@ class MESSENGERdata:
             assert 0, 'You somehow picked a bad combination.'
 
     def model(self, inputs_, npackets, quantity='radiance',
-                                       dphi=3*u.deg,
-                                       overwrite=False,
-                                       filenames=None):
+              dphi=3*u.deg, overwrite=False, filenames=None, label=None):
         from nexoclom import Input, modeldriver, LOSResult
 
         if isinstance(inputs_, str):
@@ -496,12 +493,17 @@ class MESSENGERdata:
         modeldriver(inputs, npackets, overwrite=overwrite)
 
         # Simulate the data
-        self.inputs = inputs
+        if 'inputs' in self.keys():
+            self.inputs.append(inputs)
+        else:
+            self.inputs = [inputs]
+
         self.set_frame('Model')
-        self.modelresult = LOSResult(inputs, self.data, quantity,
-                                     dphi=dphi, filenames=filenames,
-                                     overwrite=overwrite)
-        self.data['model'] = self.modelresult.radiance/1e3 # Convert to kR
+        modelresult = LOSResult(inputs, self.data, quantity,
+                                dphi=dphi, filenames=filenames,
+                                overwrite=overwrite)
+        modkey = f'model{len(self.inputs)-1:00d}'
+        self.data[modkey] = modelresult.radiance/1e3 # Convert to kR
 
         interval = PercentileInterval(50)
         lim = interval.get_limits(self.data.radiance)
@@ -510,11 +512,30 @@ class MESSENGERdata:
 
         strunit = u.def_unit('10**26 atoms/s', 1e26/u.s)
         m_data = np.mean(self.data.radiance[mask])
-        m_model = np.mean(self.data.model[mask])
-        self.modelstrength = m_data/m_model * strunit * strunit
-        self.data.model = self.data.model * self.modelstrength.value
+        m_model = np.mean(self.data[modkey][mask])
+        modelstrength = m_data/m_model * strunit * strunit
+        self.data[modkey] = self.data[modkey] * modelstrength.value
 
-        print(self.modelstrength)
+        if 'modelstrength' in self.keys():
+            self.modelstrength.append(modelstrength)
+        else:
+            self.modelstrength = [modelstrength]
+
+        if label is None:
+            label = modkey
+        else:
+            pass
+        if 'modellabel' in self.keys():
+            self.modellabel.append(label)
+        else:
+            self.modellabel = [label]
+
+        if 'modelkey' in self.keys():
+            self.modelkey.append(modkey)
+        else:
+            self.modelkey = [modkey]
+
+        print(f'Model strength for {label} = {modelstrength}')
 
         # Put the old TAA back in.
         inputs.geometry.taa = oldtaa
@@ -530,30 +551,46 @@ class MESSENGERdata:
             pass
 
         # Format the date correction
-        self.data['utcstr'] = self.data['utc'].apply(lambda x: x.isoformat()[0:19])
+        self.data['utcstr'] = self.data['utc'].apply(
+            lambda x: x.isoformat()[0:19])
 
         # Put the dataframe in a useable form
         source = plt.ColumnDataSource(self.data)
 
         # Make the figure
-        fig = plt.figure(plot_width=1200, plot_height=800, x_axis_type='datetime',
-                         title=f'{self.species}, {self.query}', x_axis_label='UTC',
+        fig = plt.figure(plot_width=1200, plot_height=800,
+                         x_axis_type='datetime',
+                         title=f'{self.species}, {self.query}',
+                         x_axis_label='UTC',
                          y_axis_label='Radiance (kR)',
-                         tools=['pan', 'box_zoom', 'reset'])
+                         tools=['pan', 'box_zoom', 'reset', 'save'])
 
         # plot the data
         dplot = fig.circle(x='utc', y='radiance', size=7, color='black',
                            legend='Data', hover_color='white', source=source)
-        datahover = HoverTool(tooltips=[('index', '$index'), ('UTC', '@utcstr'),
-                                        ('Radiance', '@radiance{0.2f} kR'),
-                                        ('Model', '@model{0.2f} kR')],
+
+        # tool tips
+        tips = [('index', '$index'), ('UTC', '@utcstr'),
+                ('Radiance', '@radiance{0.2f} kR')]
+        for modkey, modlabel in zip(self.modelkey, self.modellabel):
+            tips.append((modlabel, f'@{modkey}{{0.2f}} kR'))
+        datahover = HoverTool(tooltips=tips,
                               renderers=[dplot])
         fig.add_tools(datahover)
 
         # Plot the model
-        fig.line(self.data.utc, self.data.model, color='red', legend='Model', )
-        fig.circle(self.data.utc, self.data.model, color='red', size=7,
-                   legend='Model', )
+        col = (c for c in Set1[9])
+        for modkey,modlabel in zip(self.modelkey, self.modellabel):
+            try:
+                c = next(col)
+            except StopIteration:
+                col = (c for c in Set1[9])
+                c = next(col)
+
+            fig.line(self.data.utc, self.data[modkey], legend=modlabel)
+            f = fig.circle(x='utc', y=modkey, size=7, source=source,
+                           legend=modlabel, color=next(col))
+            datahover.renderers.append(f)
 
         # Labels, etc.
         fig.title.align = 'center'
@@ -564,7 +601,7 @@ class MESSENGERdata:
         fig.legend.click_policy = 'hide'
 
         if filename is not None:
-            plt.output_file('test_plot.html')
+            plt.output_file(filename)
             plt.save(fig)
         else:
             pass
