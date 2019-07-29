@@ -1,82 +1,167 @@
-"""MESSENGER UVVS data class
-Convert MESSENGER data into a useable class
-*_temp.pickle are straight pickled versions of the IDL summmary files
-Creates files that match my previous IDL summary files
-This needs to be rerun if more methods are added to the class"""
+"""MESSENGER UVVS data class"""
 import numpy as np
-import os
-import glob
-import pickle
 import pandas as pd
 import bokeh.plotting as plt
 from bokeh.models import HoverTool
 from bokeh.palettes import Set1
-from scipy import io
-from astropy.time import Time
 from astropy import units as u
 from astropy.visualization import PercentileInterval
-from solarsystemMB import SSObject, planet_geometry
 from .database_setup import database_connect
 
 
-def merc_year(datatime=None, initialize=False):
-    """Insert/read start date for each Mercury year from database."""
-    tstart = Time('2011-03-18T00:00:00', format='isot', scale='utc')
-    tend = Time('2015-04-30T23:59:59', format='isot', scale='utc')
-
-    if initialize:
-        times_ = np.arange(tstart.jd, tend.jd)
-        times = [Time(t, format='jd', scale='utc') for t in times_]
-
-        taa = np.ndarray((len(times),))*u.rad
-        for i,t in enumerate(times):
-            time = Time(t, format='jd', scale='utc')
-            geo = planet_geometry(time, 'Mercury')
-            taa[i] = geo['taa']
-
-        styear = [times[0]]
-        for a,b,c in zip(taa[0:-1], taa[1:], times[1:]):
-            if a > b:
-                styear.append(c)
-                print(c.iso)
-        endyr = [*styear[1:], tend]
-
-        with database_connect() as con:
-            cur = con.cursor()
-            try:
-                cur.execute('DROP table MESmercyear')
-            except:
-                pass
-            cur.execute('''CREATE table MESmercyear
-                            (yrnum int PRIMARY KEY,
-                             yrstart timestamp,
-                             yrend timestamp)''')
-            for i,d in enumerate(zip(styear, endyr)):
-                cur.execute(f'''INSERT into MESmercyear
-                                values ({i}, '{d[0].iso}', '{d[1].iso}')''')
-    else:
-        pass
-
-    if datatime is not None:
-        with database_connect() as con:
-            yrnum = pd.read_sql('''SELECT * from MESmercyear''', con)
-
-        myear = np.ndarray((len(datatime),), dtype=int)
-        for i,yr in yrnum.iterrows():
-            q = (datatime > yr.yrstart) & (datatime < yr.yrend)
-            myear[q] = yr.yrnum
-
-        return myear
-    else:
-        return None
-
-
 class MESSENGERdata:
-    def __init__(self, species=None, comparisons=None):
-        """Retrieve MESSENGER data from database
+    """Retrieve MESSENGER data from database.
+    Given a species and set of comparisons, retrieve MESSSENGER UVVS
+    data from the database. The list of searchable fields is given at
+    :doc:`database_fields`.
+    
+    Returns a MESSENGERdata Object.
+    
+    **Parameters**
+    
+    species
+        Species to search. This is required because the data from each
+        species is stored in a different database table.
+        
+    query
+        A SQL-style list of comparisons.
+        
+    The data in the object created is extracted from the database tables using
+    the query:
+    
+    ::
+    
+        SELECT *
+        FROM <species>uvvsdata, <species>pointing
+        WHERE <query>
+    
+    See examples below.
+    
+    **Class Atributes**
+    
+    species
+        The object can only contain a single species.
+        
+    frame
+        Coordinate frame for the data, either MSO or Model.
+        
+    query
+        SQL query used to search the database and create the object.
+    
+    data
+        Pandas dataframe containing result of SQL query. Columns in the
+        dataframe are the same as in the database except *frame* and
+        *species* have been dropped as they are redundant. If models have been
+        run, there are also columns in the form modelN for the Nth model run.
+        
+    taa
+        Median true anomaly for the data in radians.
+        
+    modellabel
+        If *N* models have been run, this is a dictionary in the form
+        `{'model0':label0, ..., 'modelN':labelN}` containing descriptions for
+        the models.
+        
+    modelstrength
+        If *N* models have been run, this is a dictionary in the form
+        `{'model0':strength0, ..., 'modelN':strengthN}` containing modeled
+        source rates in units of :math:`10^{26}` atoms/s.
+        
+    **Examples**
+    
+    1. Loading data
+    
+    ::
+    
+        >>> from MESSENGERuvvs import MESSENGERdata
+        
+        >>> CaData = MESSENGERdata('Ca', 'orbit = 36')
+        
+        >>> print(CaData)
+        Species: Ca
+        Query: orbit = 36
+        Frame: MSO
+        Object contains 581 spectra.
+        
+        >>> NaData = MESSENGERdata('Na', 'orbit > 100 and orbit < 110')
+        
+        >>> print(NaData)
+        Species: Na
+        Query: orbit > 100 and orbit < 110
+        Frame: MSO
+        Object contains 3051 spectra.
+        
+        >>> MgData = MESSENGERdata('Mg',
+                'loctimetan > 5.5 and loctimetan < 6.5 and alttan < 1000')
+        
+        >>> print(len(MgData))
+        45766
+        
+    2. Accessing data.
+    
+    * The observations are stored within the MESSENGERdata object in a
+      `pandas <https://pandas.pydata.org>`_ dataframe attribute called *data*.
+      Please see the `pandas documentation <https://pandas.pydata.org>`_ for
+      more information on how to work with dataframes.
+    
+    ::
+    
+        >>> print(CaData.data.head(5))
+                                 utc  orbit  merc_year  ...  loctimetan         slit               utcstr
+        unum                                            ...
+        3329 2011-04-04 21:24:11.820     36          0  ...   14.661961  Atmospheric  2011-04-04T21:24:11
+        3330 2011-04-04 21:25:08.820     36          0  ...   12.952645  Atmospheric  2011-04-04T21:25:08
+        3331 2011-04-04 21:26:05.820     36          0  ...   12.015670  Atmospheric  2011-04-04T21:26:05
+        3332 2011-04-04 21:27:02.820     36          0  ...   12.007919  Atmospheric  2011-04-04T21:27:02
+        3333 2011-04-04 21:27:59.820     36          0  ...   12.008750  Atmospheric  2011-04-04T21:27:59
+        
+        [5 rows x 29 columns]
 
-        Species is required because each species is in different tables
-        At least one SQL-formatted comparison is required."""
+    * Individual observations can be extracted using standard Python
+      slicing techniques:
+     
+    ::
+        
+        >>> print(CaData[3:8])
+        Species: Ca
+        Query: orbit = 36
+        Frame: MSO
+        Object contains 5 spectra.
+
+        >>> print(CaData[3:8].data['taa'])
+        unum
+        3332    1.808107
+        3333    1.808152
+        3334    1.808198
+        3335    1.808243
+        3336    1.808290
+        Name: taa, dtype: float64
+
+    3. Modeling data
+    
+    ::
+    
+        >>> inputs = Input('Ca.spot.Maxwellian.input')
+        >>> CaData.model(inputs, 1e5, label='Model 1')
+        >>> inputs..speeddist.temperature /= 2.  # Run model with different temperature
+        >>> CaData.model(inputs, 1e5, label='Model 2')
+        
+    4. Plotting data
+    
+    ::
+    
+        >>> CaData.plot('Ca.orbit36.models.html')
+    
+    5. Exporting data to a file
+    
+    ::
+    
+        >>> CaData.export('modelresults.csv')
+        >>> CaData.export('modelresults.html', columns=['taa'])
+
+    
+    """
+    def __init__(self, species=None, comparisons=None):
         allspecies = ['Na', 'Ca', 'Mg']
         if species is None:
             # Return an empty object
@@ -137,250 +222,7 @@ class MESSENGERdata:
                 self.frame = None
                 self.data = None
                 self.taa = None
-
-    @staticmethod
-    def initialize(datapath, database='thesolarsystemmb'):
-        """Convert raw IDL sav files to pickles"""
-        mercury = SSObject('Mercury')
-
-        # Add to the database
-        con = database_connect()
-        cur = con.cursor()
-        try:
-            cur.execute('DROP table nauvvsdata')
-            cur.execute('DROP table napointing')
-            cur.execute('DROP table cauvvsdata')
-            cur.execute('DROP table capointing')
-            cur.execute('DROP table mguvvsdata')
-            cur.execute('DROP table mgpointing')
-        except:
-            pass
-
-        print('creating UVVS tables')
-        spec = ['Ca', 'Na', 'Mg']
-        for sp in spec:
-            # Table with spectrum information
-            cur.execute(f'''CREATE table {sp}uvvsdata (
-                               unum SERIAL PRIMARY KEY,
-                               species text,
-                               frame text,
-                               UTC timestamp,
-                               orbit int,
-                               merc_year int,
-                               taa float,
-                               rmerc float,
-                               drdt float,
-                               subslong float,
-                               g float,
-                               radiance float,
-                               sigma float)''')
-
-            # Table with MESSENGER geometry and UVVS pointing
-            cur.execute(f'''CREATE table {sp}pointing (
-                               pnum SERIAL PRIMARY KEY,
-                               x float,
-                               y float,
-                               z float,
-                               xbore float,
-                               ybore float,
-                               zbore float,
-                               obstype text,
-                               obstype_num int,
-                               xtan float,
-                               ytan float,
-                               ztan float,
-                               rtan float,
-                               alttan float,
-                               longtan float,
-                               lattan float,
-                               loctimetan float,
-                               slit text)''')
-            # Not including slit corners right now
-
-        savfiles = glob.glob(datapath+'/*.sav')
-        savfiles = sorted(savfiles)
-        for oldfile in savfiles:
-            # realfile = oldfile.replace('.sav', '_temp.pkl')
-            newfile = oldfile.replace('.sav', '.pkl')
-            print('{}\n{}\n***'.format(oldfile, newfile))
-            data = io.readsav(oldfile, python_dict=True)
-            # data = pickle.load(open(realfile, 'rb'))
-
-            kR = u.def_unit('kR', 1e3*u.R)
-            Rmerc = u.def_unit('R_Mercury', mercury.radius)
-            nm = u.def_unit('nm', 1e-9*u.m)
-
-            npts = len(data['orb_num'])
-            species = os.path.basename(oldfile)[0:2].lower()
-
-            # Determine UT for each spectrum
-            t_iso = ['{}:{}:{}'.format('20' + time[0:2].decode('utf-8'),
-                                       time[2:5].decode('utf-8'),
-                                       time[6:].decode('utf-8'))
-                     for time in data['step_utc_time']]
-            UTC = Time(t_iso, format='yday')
-
-            # Orbit number for each data spectrum
-            orbit = np.array([int(o) for o in data['orb_num']])
-
-            # determine Mercury year
-            myear = merc_year(UTC)
-            rmerc = (np.sqrt(np.sum(data['planet_sun_vector_tg']**2, axis=1)) *
-                     u.km).to(u.AU)
-
-            radiance = data[f'{species.lower()}_tot_rad_kr']
-            sigma = radiance/data[f'{species.lower()}_tot_rad_snr']
-
-            # Spacecraft position and boresight in MSO
-            xyz = np.ndarray((npts, 3))
-            bore = np.ndarray((npts, 3))
-            corn0 = np.ndarray((npts, 3))
-            corn1 = np.ndarray((npts, 3))
-            corn2 = np.ndarray((npts, 3))
-            corn3 = np.ndarray((npts, 3))
-            for i in np.arange(npts):
-                xyz[i,:] = np.dot(data['mso_rotation_matrix'][i,:,:],
-                                  data['planet_sc_vector_tg'][i,:])/mercury.radius.value
-                bore[i,:] = np.dot(data['mso_rotation_matrix'][i,:,:],
-                                 data['boresight_unit_vector_center_tg'][i,:])
-                corn0[i,:] = np.dot(data['mso_rotation_matrix'][i,:,:],
-                                    data['boresight_unit_vector_c1_tg'][i,:])
-                corn1[i,:] = np.dot(data['mso_rotation_matrix'][i,:,:],
-                                    data['boresight_unit_vector_c2_tg'][i,:])
-                corn2[i,:] = np.dot(data['mso_rotation_matrix'][i,:,:],
-                                    data['boresight_unit_vector_c3_tg'][i,:])
-                corn3[i,:] = np.dot(data['mso_rotation_matrix'][i,:,:],
-                                    data['boresight_unit_vector_c4_tg'][i,:])
-
-            xcorner = np.array([corn0[:,0], corn1[:,0],
-                                corn2[:,0], corn3[:,0]]).transpose()
-            ycorner = np.array([corn0[:,1], corn1[:,1],
-                                corn2[:,1], corn3[:,1]]).transpose()
-            zcorner = np.array([corn0[:,2], corn1[:,2],
-                                corn2[:,2], corn3[:,2]]).transpose()
-
-            # Determine tangent point
-            rr = np.linalg.norm(xyz, axis=1)
-            t = -np.sum(xyz*bore, axis=1)
-            tanpt = xyz + bore*t[:,np.newaxis]
-            rtan = np.linalg.norm(tanpt, axis=1)
-
-            slit = np.array(['Surface' if s == 0 else 'Atmospheric'
-                             for s in data['slit']])
-            obstype = np.array([str(ob).replace('b', '').replace("'", '').strip()
-                       for ob in data['obs_typ']])
-
-            # Add in the spectra
-            spectra = data[species.lower()+'_rad_kr']*kR
-            wavelength = data['wavelength']*nm
-            raw = data['orig']*u.ct
-            try:
-                corrected = data['fully_corr_cr']*u.ct
-            except:
-                corrected = data['corr']*u.ct
-            dark = data['dark']*u.ct
-            solarfit = data['sol_fit']*u.ct
-
-            ndata = pd.DataFrame({
-                        'species': species,
-                        'frame': 'MSO',
-                        'UTC': UTC,
-                        'orbit': orbit,
-                        'merc_year': myear,
-                        'TAA': data['true_anomaly']*np.pi/180.,
-                        'rmerc': rmerc.value,
-                        'drdt': data['rad_vel'],
-                        'subslong': data['subsolar_longitude']*np.pi/180.,
-                        'g': data['gvals']/u.s,
-                        'radiance': radiance,
-                        'sigma': sigma,
-                        'x': xyz[:,0] * Rmerc,
-                        'y': xyz[:,1] * Rmerc,
-                        'z': xyz[:,2] * Rmerc,
-                        'xbore': bore[:,0],
-                        'ybore': bore[:,1],
-                        'zbore': bore[:,2],
-                        'xcorn1': xcorner[:,0],
-                        'xcorn2': xcorner[:,1],
-                        'xcorn3': xcorner[:,2],
-                        'xcorn4': xcorner[:,3],
-                        'ycorn1': ycorner[:,0],
-                        'ycorn2': ycorner[:,1],
-                        'ycorn3': ycorner[:,2],
-                        'ycorn4': ycorner[:,3],
-                        'zcorn1': zcorner[:,0],
-                        'zcorn2': zcorner[:,1],
-                        'zcorn3': zcorner[:,2],
-                        'zcorn4': zcorner[:,3],
-                        'obstype': obstype,
-                        'obstype_num': data['obs_typ_num'],
-                        'xtan': tanpt[:,0],
-                        'ytan': tanpt[:,1],
-                        'ztan': tanpt[:,2],
-                        'rtan': rtan,
-                        'alttan': data['target_altitude_set'][:,0],
-                        'minalt': data['minalt'],
-                        'longtan': data['target_longitude_set'][:,0]*np.pi/180,
-                        'lattan': data['target_latitude_set'][:,0]*np.pi/180,
-                        'loctimetan': data['obs_solar_localtime'],
-                        'slit': slit})
-            ndata.fillna(-999, inplace=True)
-
-            spectra = {'spectra': spectra,
-                       'wavelength': wavelength,
-                       'raw': raw,
-                       'corrected': corrected,
-                       'dark': dark,
-                       'solarfit': solarfit}
-
-            # save this for later
-            with open(newfile, 'wb') as f:
-                pickle.dump(ndata, f, pickle.HIGHEST_PROTOCOL)
-            with open(newfile.replace('.pkl', '_spectra.pkl'), 'wb') as f:
-                pickle.dump(spectra, f, pickle.HIGHEST_PROTOCOL)
-
-            print('Inserting UVVS data')
-            for i,dpoint in ndata.iterrows():
-                cur.execute(f'''INSERT into {species}uvvsdata (
-                                    species, frame, UTC, orbit, merc_year,
-                                    taa, rmerc, drdt, subslong, g, radiance,
-                                    sigma) values (
-                                    '{dpoint.species}',
-                                    '{dpoint.frame}',
-                                    '{dpoint.UTC.iso}',
-                                    {dpoint.orbit},
-                                    {dpoint.merc_year},
-                                    {dpoint.TAA},
-                                    {dpoint.rmerc},
-                                    {dpoint.drdt},
-                                    {dpoint.subslong},
-                                    {dpoint.g},
-                                    {dpoint.radiance},
-                                    {dpoint.sigma})''')
-                cur.execute(f'''INSERT into {species}pointing (
-                                    x, y, z, xbore, ybore, zbore,
-                                    obstype, obstype_num, xtan, ytan, ztan,
-                                    rtan, alttan, longtan, lattan,
-                                    loctimetan, slit) values (
-                                    {dpoint.x},
-                                    {dpoint.y},
-                                    {dpoint.z},
-                                    {dpoint.xbore},
-                                    {dpoint.ybore},
-                                    {dpoint.zbore},
-                                    '{dpoint.obstype}',
-                                    {dpoint.obstype_num},
-                                    {dpoint.xtan},
-                                    {dpoint.ytan},
-                                    {dpoint.ztan},
-                                    {dpoint.rtan},
-                                    {dpoint.alttan},
-                                    {dpoint.longtan},
-                                    {dpoint.lattan},
-                                    {dpoint.loctimetan},
-                                    '{dpoint.slit}')''')
-        con.close()
-
+                
     def __str__(self):
         result = (f'Species: {self.species}\n'
                   f'Query: {self.query}\n'
@@ -428,6 +270,7 @@ class MESSENGERdata:
             yield self[i]
 
     def keys(self):
+        """Return all keys in the object, including dataframe columns"""
         keys = list(self.__dict__.keys())
         keys.extend([f'data.{col}' for col in self.data.columns])
         return keys
@@ -503,9 +346,12 @@ class MESSENGERdata:
         modelresult = LOSResult(inputs, self.data, quantity,
                                 dphi=dphi, filenames=filenames,
                                 overwrite=overwrite)
+        
+        # modkey is the number for this model
         modkey = f'model{len(self.inputs)-1:00d}'
         self.data[modkey] = modelresult.radiance/1e3 # Convert to kR
 
+        # Estimate model strength (source rate) by mean of middle 50%
         interval = PercentileInterval(50)
         lim = interval.get_limits(self.data.radiance)
         mask = ((self.data.radiance >= lim[0]) &
@@ -518,23 +364,18 @@ class MESSENGERdata:
         self.data[modkey] = self.data[modkey] * modelstrength.value
 
         if 'modelstrength' in self.keys():
-            self.modelstrength.append(modelstrength)
+            self.modelstrength[modkey] = modelstrength
         else:
-            self.modelstrength = [modelstrength]
+            self.modelstrength = {modkey:modelstrength}
 
         if label is None:
             label = modkey
         else:
             pass
         if 'modellabel' in self.keys():
-            self.modellabel.append(label)
+            self.modellabel[modkey] = label
         else:
-            self.modellabel = [label]
-
-        if 'modelkey' in self.keys():
-            self.modelkey.append(modkey)
-        else:
-            self.modelkey = [modkey]
+            self.modellabel = {modkey:label}
 
         print(f'Model strength for {label} = {modelstrength}')
 
@@ -573,25 +414,27 @@ class MESSENGERdata:
         # tool tips
         tips = [('index', '$index'), ('UTC', '@utcstr'),
                 ('Radiance', '@radiance{0.2f} kR')]
-        for modkey, modlabel in zip(self.modelkey, self.modellabel):
-            tips.append((modlabel, f'@{modkey}{{0.2f}} kR'))
+        if 'modellabel' in self.keys():
+            for modkey, modlabel in self.modellabel.items():
+                tips.append((modlabel, f'@{modkey}{{0.2f}} kR'))
         datahover = HoverTool(tooltips=tips,
                               renderers=[dplot])
         fig.add_tools(datahover)
 
         # Plot the model
         col = (c for c in Set1[9])
-        for modkey,modlabel in zip(self.modelkey, self.modellabel):
-            try:
-                c = next(col)
-            except StopIteration:
-                col = (c for c in Set1[9])
-                c = next(col)
+        if 'modellabel' in self.keys():
+            for modkey, modlabel in self.modellabel.items():
+                try:
+                    c = next(col)
+                except StopIteration:
+                    col = (c for c in Set1[9])
+                    c = next(col)
 
-            fig.line(self.data.utc, self.data[modkey], legend=modlabel)
-            f = fig.circle(x='utc', y=modkey, size=7, source=source,
-                           legend=modlabel, color=next(col))
-            datahover.renderers.append(f)
+                fig.line(self.data.utc, self.data[modkey], legend=modlabel)
+                f = fig.circle(x='utc', y=modkey, size=7, source=source,
+                               legend=modlabel, color=c)
+                datahover.renderers.append(f)
 
         # Labels, etc.
         fig.title.align = 'center'
@@ -611,11 +454,31 @@ class MESSENGERdata:
             plt.show(fig)
 
     def export(self, filename, columns=['utc', 'radiance']):
+        """Export data and models to a file.
+        **Parameters**
+        
+        filename
+            Filename to export model results to. The file extension determines
+            the format. Formats available: csv, pkl, html, tex
+            
+        columns
+            Columns from the data dataframe to export. Available columns can
+            be found by calling the `keys()` method on the data object.
+            Default = ['utc', 'radiance'] and all model result columns. Note:
+            The default columns are always included in the output
+            regardless of whether they are specified.
+        
+        **Returns**
+        
+        No outputs.
+        
+        """
         columns_ = columns.copy()
-        if 'modelkey' in self.keys():
-            columns_.extend(self.modelkey)
-        else: pass
-
+        if 'modellabel' in self.keys():
+            columns_.extend(self.modellabel.keys())
+        else:
+            pass
+        
         # Make sure radiance is in there
         if 'radiance' not in columns_:
             columns_.append('radiance')
