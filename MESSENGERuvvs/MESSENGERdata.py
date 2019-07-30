@@ -369,9 +369,10 @@ class MESSENGERdata:
             self.modelstrength = {modkey:modelstrength}
 
         if label is None:
-            label = modkey
+            label = modkey.capitalize()
         else:
             pass
+        
         if 'modellabel' in self.keys():
             self.modellabel[modkey] = label
         else:
@@ -431,10 +432,12 @@ class MESSENGERdata:
                     col = (c for c in Set1[9])
                     c = next(col)
 
-                fig.line(self.data.utc, self.data[modkey], legend=modlabel)
+                f = fig.line(x='utc', y=modkey, source=source,
+                               legend=modlabel, color=c)
                 f = fig.circle(x='utc', y=modkey, size=7, source=source,
                                legend=modlabel, color=c)
                 datahover.renderers.append(f)
+                print(modlabel)
 
         # Labels, etc.
         fig.title.align = 'center'

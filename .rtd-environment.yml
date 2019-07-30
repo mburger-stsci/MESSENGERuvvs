@@ -1,4 +1,4 @@
-name: physicsMB
+name: MESSENGERuvvs
 
 channels:
     - defaults
@@ -6,8 +6,8 @@ channels:
 dependencies:
     - python>=3.6
     - astropy
-    - matplotlib
     - numpy
+    - bokeh
     - pip:
       - sphinx
       - sphinx_rtd_theme
