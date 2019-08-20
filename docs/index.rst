@@ -33,8 +33,8 @@ format used here if necessary.
 
 Reporting Issues
 ================
-This project is hosted on github at `atomicdataMB
-<https://github.com/mburger-stsci/atomicdataMB>`_. Please report bugs or make
+This project is hosted on github at `MESSENGERuvvs
+<https://github.com/mburger-stsci/MESSENGERuvvs>`_. Please report bugs or make
 comments there.
 
 Contributing

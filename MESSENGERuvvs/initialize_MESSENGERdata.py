@@ -6,7 +6,7 @@ import glob
 from scipy import io
 from astropy.time import Time
 from astropy import units as u
-from solarsystemMB import SSObject
+from solarsystemMB import SSObject, planet_geometry
 from .database_setup import database_connect
 
 
@@ -140,6 +140,18 @@ def initialize_MESSENERdata(datapath):
                                lattan float,
                                loctimetan float,
                                slit text)''')  # Not including slit corners right now
+
+        # Create table for MESSENGER comparison
+        cur.execute('''CREATE TABLE uvvsmodels (
+                           idnum SERIAL PRIMARY KEY,
+                           out_idnum bigint,
+                           quantity text,
+                           orbit int,
+                           dphi float,
+                           mechanism text,
+                           wavelength text,
+                           filename text)''')
+        print('Created uvvsmodels table')
     
     savfiles = glob.glob(datapath+'/*.sav')
     savfiles = sorted(savfiles)

@@ -7,6 +7,14 @@ from bokeh.palettes import Set1
 from astropy import units as u
 from astropy.visualization import PercentileInterval
 from .database_setup import database_connect
+from nexoclom import Input, LOSResult
+
+
+class InputError(Exception):
+    """Raised when a required parameter is not included in the inputfile."""
+    def __init__(self, expression, message):
+        self.expression = expression
+        self.message = message
 
 
 class MESSENGERdata:
@@ -57,12 +65,12 @@ class MESSENGERdata:
     taa
         Median true anomaly for the data in radians.
         
-    modellabel
+    model_label
         If *N* models have been run, this is a dictionary in the form
         `{'model0':label0, ..., 'modelN':labelN}` containing descriptions for
         the models.
         
-    modelstrength
+    model_strength
         If *N* models have been run, this is a dictionary in the form
         `{'model0':strength0, ..., 'modelN':strengthN}` containing modeled
         source rates in units of :math:`10^{26}` atoms/s.
@@ -163,22 +171,20 @@ class MESSENGERdata:
     """
     def __init__(self, species=None, comparisons=None):
         allspecies = ['Na', 'Ca', 'Mg']
+        self.species = None
+        self.frame = None
+        self.query = None
+        self.data = None
+        self.taa = None
+        self.inputs = None
+        self.model_strength = None
+        self.model_label = None
+        
         if species is None:
-            # Return an empty object
-            self.species = None
-            self.frame = None
-            self.query = None
-            self.data = None
-            self.taa = None
+            pass
         elif species not in allspecies:
             # Return list of valid species
             print(f"Valid species are {', '.join(allspecies)}")
-            # Return an empty object
-            self.species = None
-            self.frame = None
-            self.query = None
-            self.data = None
-            self.taa = None
         elif comparisons is None:
             # Return list of queryable fields
             with database_connect() as con:
@@ -188,12 +194,6 @@ class MESSENGERdata:
             print('Available fields are:')
             for col in columns.columns:
                 print(f'\t{col}')
-            # Return an empty object
-            self.species = None
-            self.frame = None
-            self.query = None
-            self.data = None
-            self.taa = None
         else:
             # Run the query and try to make the object
             query = f'''SELECT * from {species}uvvsdata, {species}pointing
@@ -203,8 +203,8 @@ class MESSENGERdata:
                 with database_connect() as con:
                     data = pd.read_sql(query, con)
             except:
-                print(query)
-                assert 0, 'Problem with comparisons given.'
+                raise Input('MESSENGERdata.__init__',
+                            'Problem with comparisons given.')
 
             if len(data) > 0:
                 self.species = species
@@ -217,11 +217,6 @@ class MESSENGERdata:
             else:
                 print(query)
                 print('No data found')
-                self.species = species
-                self.query = comparisons
-                self.frame = None
-                self.data = None
-                self.taa = None
                 
     def __str__(self):
         result = (f'Species: {self.species}\n'
@@ -249,6 +244,8 @@ class MESSENGERdata:
             q = slice(q_, q_+1)
         elif isinstance(q_, slice):
             q = q_
+        elif isinstance(q_, pd.Series):
+            q = np.where(q_)[0]
         else:
             raise TypeError
 
@@ -258,10 +255,9 @@ class MESSENGERdata:
         new.query = self.query
         new.taa = self.taa
         new.data = self.data.iloc[q].copy()
-        try:
-            new.modelstrength = self.modelstrength
-        except:
-            pass
+        new.model_strength = self.model_strength
+        new.model_label = self.model_label
+        new.inputs = self.inputs
 
         return new
 
@@ -298,8 +294,6 @@ class MESSENGERdata:
             self.data.x, self.data.y = self.data.y.copy(), -self.data.x.copy()
             self.data.xbore, self.data.ybore = (self.data.ybore.copy(),
                                                 -self.data.xbore.copy())
-            # self.data.xcorner, self.data.ycorner = (self.data.ycorner,
-            #                                         -self.data.xcorner)
             self.data.xtan, self.data.ytan = (self.data.ytan.copy(),
                                               -self.data.xtan.copy())
             self.frame = 'Model'
@@ -307,8 +301,6 @@ class MESSENGERdata:
             self.data.x, self.data.y = -self.data.y.copy(), self.data.x.copy()
             self.data.xbore, self.data.ybore = (-self.data.ybore.copy(),
                                                 self.data.xbore.copy())
-            # self.data.xcorner, self.data.ycorner = (-self.data.ycorner,
-            #                                         self.data.xcorner)
             self.data.xtan, self.data.ytan = (-self.data.ytan.copy(),
                                               self.data.xtan.copy())
             self.frame = 'MSO'
@@ -317,12 +309,13 @@ class MESSENGERdata:
 
     def model(self, inputs_, npackets, quantity='radiance',
               dphi=3*u.deg, overwrite=False, filenames=None, label=None):
-        from nexoclom import Input, modeldriver, LOSResult
 
         if isinstance(inputs_, str):
             inputs = Input(inputs_)
-        elif isinstance(inputs_, Input):
+        elif hasattr(inputs_, 'line_of_sight'):
             inputs = inputs_
+        else:
+            raise InputError('MESSENGERdata.model', 'Problem with the inputs.')
 
         # TAA needs to match the data
         oldtaa = inputs.geometry.taa
@@ -334,22 +327,22 @@ class MESSENGERdata:
             assert 0, 'Too wide a range of taa'
 
         # Run the model
-        modeldriver(inputs, npackets, overwrite=overwrite)
+        inputs.run(npackets, overwrite=overwrite)
 
         # Simulate the data
-        if 'inputs' in self.keys():
-            self.inputs.append(inputs)
-        else:
+        if self.inputs is None:
             self.inputs = [inputs]
+        else:
+            self.inputs.append(inputs)
 
         self.set_frame('Model')
-        modelresult = LOSResult(inputs, self.data, quantity,
-                                dphi=dphi, filenames=filenames,
-                                overwrite=overwrite)
+        model_result = inputs.line_of_sight(self.data, quantity,
+                                            dphi=dphi, filenames=filenames,
+                                            overwrite=overwrite)
         
         # modkey is the number for this model
         modkey = f'model{len(self.inputs)-1:00d}'
-        self.data[modkey] = modelresult.radiance/1e3 # Convert to kR
+        self.data[modkey] = model_result.radiance/1e3 # Convert to kR
 
         # Estimate model strength (source rate) by mean of middle 50%
         interval = PercentileInterval(50)
@@ -360,25 +353,25 @@ class MESSENGERdata:
         strunit = u.def_unit('10**26 atoms/s', 1e26/u.s)
         m_data = np.mean(self.data.radiance[mask])
         m_model = np.mean(self.data[modkey][mask])
-        modelstrength = m_data/m_model * strunit * strunit
-        self.data[modkey] = self.data[modkey] * modelstrength.value
+        model_strength = m_data/m_model * strunit * strunit
+        self.data[modkey] = self.data[modkey] * model_strength.value
 
-        if 'modelstrength' in self.keys():
-            self.modelstrength[modkey] = modelstrength
+        if self.model_strength is None:
+            self.model_strength = {modkey: model_strength}
         else:
-            self.modelstrength = {modkey:modelstrength}
+            self.model_strength[modkey] = model_strength
 
         if label is None:
             label = modkey.capitalize()
         else:
             pass
         
-        if 'modellabel' in self.keys():
-            self.modellabel[modkey] = label
+        if self.model_label is None:
+            self.model_label = {modkey: label}
         else:
-            self.modellabel = {modkey:label}
+            self.model_label[modkey] = label
 
-        print(f'Model strength for {label} = {modelstrength}')
+        print(f'Model strength for {label} = {model_strength}')
 
         # Put the old TAA back in.
         inputs.geometry.taa = oldtaa
@@ -415,8 +408,8 @@ class MESSENGERdata:
         # tool tips
         tips = [('index', '$index'), ('UTC', '@utcstr'),
                 ('Radiance', '@radiance{0.2f} kR')]
-        if 'modellabel' in self.keys():
-            for modkey, modlabel in self.modellabel.items():
+        if  self.model_label is not None:
+            for modkey, modlabel in self.model_label.items():
                 tips.append((modlabel, f'@{modkey}{{0.2f}} kR'))
         datahover = HoverTool(tooltips=tips,
                               renderers=[dplot])
@@ -424,8 +417,8 @@ class MESSENGERdata:
 
         # Plot the model
         col = (c for c in Set1[9])
-        if 'modellabel' in self.keys():
-            for modkey, modlabel in self.modellabel.items():
+        if self.model_label is not None:
+            for modkey, modlabel in self.model_label.items():
                 try:
                     c = next(col)
                 except StopIteration:
@@ -477,8 +470,8 @@ class MESSENGERdata:
         
         """
         columns_ = columns.copy()
-        if 'modellabel' in self.keys():
-            columns_.extend(self.modellabel.keys())
+        if self.model_label is not None:
+            columns_.extend(self.model_label.keys())
         else:
             pass
         

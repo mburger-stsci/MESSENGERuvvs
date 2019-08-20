@@ -99,7 +99,11 @@ def messenger_database_setup(force=False):
     No output.
     
     """
-    if isinstance(sys.modules['psycopg2'], types.ModuleType):
+    # Get database name and port
+    database, port = database_connect(return_con=False)
+
+    if ((isinstance(sys.modules['psycopg2'], types.ModuleType)) and
+        ('test' not in database)):
         # Read in current config file if it exists
         configfile = os.path.join(os.environ['HOME'], '.nexoclom')
         datapath = None
@@ -120,13 +124,10 @@ def messenger_database_setup(force=False):
         else:
             pass
 
-        # Get database name and port
-        database, port = database_connect(return_con=False)
-
         # Verify database is running
         status = os.popen('pg_ctl status').read()
         if 'no server running' in status:
-            os.system(f'pg_ctl start -D $HOME/.postgres/main'
+            os.system(f'pg_ctl start -D $HOME/.postgres/main '
                       f'-l $HOME/.postgres/logfile -o "-p {port}"')
         else:
             pass
