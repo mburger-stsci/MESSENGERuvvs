@@ -170,8 +170,10 @@ def initialize_MESSENERdata(datapath):
         species = os.path.basename(oldfile)[0:2].lower()
         
         # Determine UT for each spectrum
-        t_iso = ['{}:{}:{}'.format('20'+time[0:2].decode('utf-8'), time[2:5].decode('utf-8'),
-                                   time[6:].decode('utf-8')) for time in data['step_utc_time']]
+        t_iso = ['{}:{}:{}'.format('20'+time[0:2].decode('utf-8'),
+                                   time[2:5].decode('utf-8'),
+                                   time[6:].decode('utf-8'))
+                 for time in data['step_utc_time']]
         UTC = Time(t_iso, format='yday')
         
         # Orbit number for each data spectrum
@@ -179,7 +181,8 @@ def initialize_MESSENERdata(datapath):
         
         # determine Mercury year
         myear = merc_year(UTC)
-        rmerc = (np.sqrt(np.sum(data['planet_sun_vector_tg']**2, axis=1))*u.km).to(u.AU)
+        rmerc = (np.sqrt(np.sum(data['planet_sun_vector_tg']**2,
+                                axis=1))*u.km).to(u.AU)
         
         radiance = data[f'{species.lower()}_tot_rad_kr']
         sigma = radiance/data[f'{species.lower()}_tot_rad_snr']
@@ -205,9 +208,12 @@ def initialize_MESSENERdata(datapath):
             corn3[i, :] = np.dot(data['mso_rotation_matrix'][i, :, :],
                                  data['boresight_unit_vector_c4_tg'][i, :])
         
-        xcorner = np.array([corn0[:, 0], corn1[:, 0], corn2[:, 0], corn3[:, 0]]).transpose()
-        ycorner = np.array([corn0[:, 1], corn1[:, 1], corn2[:, 1], corn3[:, 1]]).transpose()
-        zcorner = np.array([corn0[:, 2], corn1[:, 2], corn2[:, 2], corn3[:, 2]]).transpose()
+        xcorner = np.array([corn0[:, 0], corn1[:, 0],
+                            corn2[:, 0], corn3[:, 0]]).transpose()
+        ycorner = np.array([corn0[:, 1], corn1[:, 1],
+                            corn2[:, 1], corn3[:, 1]]).transpose()
+        zcorner = np.array([corn0[:, 2], corn1[:, 2],
+                            corn2[:, 2], corn3[:, 2]]).transpose()
         
         # Determine tangent point
         t = -np.sum(xyz*bore, axis=1)

@@ -342,7 +342,9 @@ class MESSENGERdata:
         
         # modkey is the number for this model
         modkey = f'model{len(self.inputs)-1:00d}'
+        packkey = f'packets{len(self.inputs)-1:00d}'
         self.data[modkey] = model_result.radiance/1e3 # Convert to kR
+        self.data[packkey] = model_result.packets
 
         # Estimate model strength (source rate) by mean of middle 50%
         interval = PercentileInterval(50)
