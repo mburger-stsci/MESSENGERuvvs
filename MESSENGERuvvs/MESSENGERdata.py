@@ -4,6 +4,7 @@ import pandas as pd
 import bokeh.plotting as plt
 from bokeh.models import HoverTool
 from bokeh.palettes import Set1
+from bokeh.io import export_png
 from astropy import units as u
 from astropy.visualization import PercentileInterval
 from .database_setup import database_connect
@@ -444,7 +445,9 @@ class MESSENGERdata:
 
         if filename is not None:
             plt.output_file(filename)
+            export_png(fig, filename=filename.replace('.html', '.png'))
             plt.save(fig)
+            
         else:
             pass
 
