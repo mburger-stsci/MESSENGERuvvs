@@ -2,13 +2,13 @@
 import numpy as np
 import pandas as pd
 import bokeh.plotting as plt
-from bokeh.models import HoverTool
+from bokeh.models import HoverTool, Whisker
 from bokeh.palettes import Set1
 from bokeh.io import export_png
 from astropy import units as u
 from astropy.visualization import PercentileInterval
 from .database_setup import database_connect
-from nexoclom import Input, LOSResult
+from nexoclom import Input
 
 
 class InputError(Exception):
@@ -394,6 +394,8 @@ class MESSENGERdata:
             lambda x: x.isoformat()[0:19])
 
         # Put the dataframe in a useable form
+        self.data['lower'] = self.data.radiance - self.data.sigma
+        self.data['upper'] = self.data.radiance + self.data.sigma
         source = plt.ColumnDataSource(self.data)
 
         # Make the figure
@@ -407,6 +409,10 @@ class MESSENGERdata:
         # plot the data
         dplot = fig.circle(x='utc', y='radiance', size=7, color='black',
                            legend='Data', hover_color='white', source=source)
+        
+        # Add error bars
+        fig.add_layout(Whisker(source=source, base='utc', upper='upper',
+                             lower='lower'))
 
         # tool tips
         tips = [('index', '$index'), ('UTC', '@utcstr'),
