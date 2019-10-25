@@ -1,7 +1,7 @@
 """MESSENGER UVVS data class"""
 import numpy as np
 import pandas as pd
-import bokeh.plotting as plt
+import bokeh.plotting as bkp
 from bokeh.models import HoverTool, Whisker
 from bokeh.palettes import Set1
 from bokeh.io import export_png
@@ -385,7 +385,7 @@ class MESSENGERdata:
                 filename += '.html'
             else:
                 pass
-            plt.output_file(filename)
+            bkp.output_file(filename)
         else:
             pass
 
@@ -396,10 +396,10 @@ class MESSENGERdata:
         # Put the dataframe in a useable form
         self.data['lower'] = self.data.radiance - self.data.sigma
         self.data['upper'] = self.data.radiance + self.data.sigma
-        source = plt.ColumnDataSource(self.data)
+        source = bkp.ColumnDataSource(self.data)
 
         # Make the figure
-        fig = plt.figure(plot_width=1200, plot_height=800,
+        fig = bkp.figure(plot_width=1200, plot_height=800,
                          x_axis_type='datetime',
                          title=f'{self.species}, {self.query}',
                          x_axis_label='UTC',
@@ -450,15 +450,15 @@ class MESSENGERdata:
         fig.legend.click_policy = 'hide'
 
         if filename is not None:
-            plt.output_file(filename)
+            bkp.output_file(filename)
             export_png(fig, filename=filename.replace('.html', '.png'))
-            plt.save(fig)
+            bkp.save(fig)
             
         else:
             pass
 
         if show:
-            plt.show(fig)
+            bkp.show(fig)
 
     def export(self, filename, columns=['utc', 'radiance']):
         """Export data and models to a file.
