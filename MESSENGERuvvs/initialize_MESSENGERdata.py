@@ -42,6 +42,8 @@ def merc_year(datatime=None, initialize=False):
                 cur.execute('DROP table MESmercyear')
             except:
                 pass
+            
+            print('creating MESmercyear')
             cur.execute('''CREATE table MESmercyear
                              (yrnum int PRIMARY KEY,
                               yrstart timestamp,
@@ -66,7 +68,7 @@ def merc_year(datatime=None, initialize=False):
         return None
     
     
-def initialize_MESSENERdata(datapath):
+def initialize_MESSENGERdata(datapath):
     """Store data from IDL summary files in a database.
     The IDL summary files were provided by Aimee Merkel.
     
@@ -92,19 +94,25 @@ def initialize_MESSENERdata(datapath):
         tables = [r[0] for r in cur.fetchall()]
 
         mestables = ['capointing', 'cauvvsdata', 'mesmercyear', 'mgpointing',
-                     'mguvvsdata', 'napointing', 'nauvvsdata']
-
+                     'mguvvsdata', 'napointing', 'nauvvsdata',
+                     'caspectra', 'naspectra', 'mgspectra',
+                     'uvvsmodels']
+        
         # Delete any tables that may exist
         for mestab in mestables:
             if mestab in tables:
                 cur.execute(f'drop table {mestab}')
             else:
                 pass
+            
+        print('creating MESmercyear table')
+        merc_year(initialize=True)
 
         print('creating UVVS tables')
         spec = ['Ca', 'Na', 'Mg']
         for sp in spec:
             # Table with spectrum information
+            print(f'Creating {sp}uvvsdata')
             cur.execute(f'''CREATE table {sp}uvvsdata (
                                unum SERIAL PRIMARY KEY,
                                species text,
@@ -121,6 +129,7 @@ def initialize_MESSENERdata(datapath):
                                sigma float)''')
             
             # Table with MESSENGER geometry and UVVS pointing
+            print(f'Creating {sp}pointing')
             cur.execute(f'''CREATE table {sp}pointing (
                                pnum SERIAL PRIMARY KEY,
                                x float,
@@ -139,9 +148,18 @@ def initialize_MESSENERdata(datapath):
                                longtan float,
                                lattan float,
                                loctimetan float,
-                               slit text)''')  # Not including slit corners right now
+                               slit text)''')  # Not including slit corners
+            
+            # Table with spectra
+            print(f'Creating {sp}spectra')
+            cur.execute(f'''CREATE table {sp}spectra (
+                                snum SERIAL PRIMARY KEY,
+                                wavelength float[],
+                                raw float[],
+                                corrected float[],
+                                dark float[],
+                                solarfit float[])''')
 
-        # Create table for MESSENGER comparison
         cur.execute('''CREATE TABLE uvvsmodels (
                            idnum SERIAL PRIMARY KEY,
                            out_idnum bigint,
@@ -196,7 +214,8 @@ def initialize_MESSENERdata(datapath):
         corn3 = np.ndarray((npts, 3))
         for i in np.arange(npts):
             xyz[i, :] = np.dot(data['mso_rotation_matrix'][i, :, :],
-                               data['planet_sc_vector_tg'][i, :])/mercury.radius.value
+                               data['planet_sc_vector_tg'][i, :]
+                               )/mercury.radius.value
             bore[i, :] = np.dot(data['mso_rotation_matrix'][i, :, :],
                                 data['boresight_unit_vector_center_tg'][i, :])
             corn0[i, :] = np.dot(data['mso_rotation_matrix'][i, :, :],
@@ -220,41 +239,72 @@ def initialize_MESSENERdata(datapath):
         tanpt = xyz+bore*t[:, np.newaxis]
         rtan = np.linalg.norm(tanpt, axis=1)
         
-        slit = np.array(['Surface' if s == 0 else 'Atmospheric' for s in data['slit']])
+        slit = np.array(['Surface' if s == 0
+                         else 'Atmospheric'
+                         for s in data['slit']])
         obstype = np.array(
-            [str(ob).replace('b', '').replace("'", '').strip() for ob in data['obs_typ']])
+            [str(ob).replace('b', '').replace("'", '').strip()
+             for ob in data['obs_typ']])
         
         # Add in the spectra
-        spectra = data[species.lower()+'_rad_kr']*kR
-        wavelength = data['wavelength']*nm
-        raw = data['orig']*u.ct
+        spectra = data[species.lower()+'_rad_kr']
+        wavelength = data['wavelength']
+        raw = data['orig']
         try:
-            corrected = data['fully_corr_cr']*u.ct
+            corrected = data['fully_corr_cr']
         except:
-            corrected = data['corr']*u.ct
-        dark = data['dark']*u.ct
-        solarfit = data['sol_fit']*u.ct
+            corrected = data['corr']
+        dark = data['dark']
+        solarfit = data['sol_fit']
         
         ndata = pd.DataFrame(
-            {'species': species, 'frame': 'MSO', 'UTC': UTC, 'orbit': orbit, 'merc_year': myear,
-                'TAA': data['true_anomaly']*np.pi/180., 'rmerc': rmerc.value,
-                'drdt': data['rad_vel'], 'subslong': data['subsolar_longitude']*np.pi/180.,
-                'g': data['gvals']/u.s, 'radiance': radiance, 'sigma': sigma, 'x': xyz[:, 0]*Rmerc,
-                'y': xyz[:, 1]*Rmerc, 'z': xyz[:, 2]*Rmerc, 'xbore': bore[:, 0],
-                'ybore': bore[:, 1], 'zbore': bore[:, 2], 'xcorn1': xcorner[:, 0],
-                'xcorn2': xcorner[:, 1], 'xcorn3': xcorner[:, 2], 'xcorn4': xcorner[:, 3],
-                'ycorn1': ycorner[:, 0], 'ycorn2': ycorner[:, 1], 'ycorn3': ycorner[:, 2],
-                'ycorn4': ycorner[:, 3], 'zcorn1': zcorner[:, 0], 'zcorn2': zcorner[:, 1],
-                'zcorn3': zcorner[:, 2], 'zcorn4': zcorner[:, 3], 'obstype': obstype,
-                'obstype_num': data['obs_typ_num'], 'xtan': tanpt[:, 0], 'ytan': tanpt[:, 1],
-                'ztan': tanpt[:, 2], 'rtan': rtan, 'alttan': data['target_altitude_set'][:, 0],
-                'minalt': data['minalt'], 'longtan': data['target_longitude_set'][:, 0]*np.pi/180,
-                'lattan': data['target_latitude_set'][:, 0]*np.pi/180,
-                'loctimetan': data['obs_solar_localtime'], 'slit': slit})
+            {'species': species,
+             'frame': 'MSO',
+             'UTC': UTC,
+             'orbit': orbit,
+             'merc_year': myear,
+             'TAA': data['true_anomaly']*np.pi/180.,
+             'rmerc': rmerc.value,
+             'drdt': data['rad_vel'],
+             'subslong': data['subsolar_longitude']*np.pi/180.,
+             'g': data['gvals']/u.s,
+             'radiance': radiance,
+             'sigma': sigma,
+             'x': xyz[:, 0]*Rmerc,
+             'y': xyz[:, 1]*Rmerc,
+             'z': xyz[:, 2]*Rmerc,
+             'xbore': bore[:, 0], 'ybore': bore[:, 1], 'zbore': bore[:, 2],
+             'xcorn1': xcorner[:, 0], 'xcorn2': xcorner[:, 1],
+             'xcorn3': xcorner[:, 2], 'xcorn4': xcorner[:, 3],
+             'ycorn1': ycorner[:, 0], 'ycorn2': ycorner[:, 1],
+             'ycorn3': ycorner[:, 2], 'ycorn4': ycorner[:, 3],
+             'zcorn1': zcorner[:, 0], 'zcorn2': zcorner[:, 1],
+             'zcorn3': zcorner[:, 2], 'zcorn4': zcorner[:, 3],
+             'obstype': obstype,
+             'obstype_num': data['obs_typ_num'],
+             'xtan': tanpt[:, 0], 'ytan': tanpt[:, 1],
+             'ztan': tanpt[:, 2], 'rtan': rtan,
+             'alttan': data['target_altitude_set'][:, 0],
+             'minalt': data['minalt'],
+             'longtan': data['target_longitude_set'][:, 0]*np.pi/180,
+             'lattan': data['target_latitude_set'][:, 0]*np.pi/180,
+             'loctimetan': data['obs_solar_localtime'],
+             'slit': slit})
         ndata.fillna(-999, inplace=True)
         
-        spectra = {'spectra': spectra, 'wavelength': wavelength, 'raw': raw, 'corrected': corrected,
-                   'dark': dark, 'solarfit': solarfit}
+        spectra = [spectra[i,:] for i in range(spectra.shape[0])]
+        wavelength = [wavelength[i,:] for i in range(wavelength.shape[0])]
+        raw = [raw[i,:] for i in range(raw.shape[0])]
+        corrected = [corrected[i,:] for i in range(corrected.shape[0])]
+        dark = [dark[i,:] for i in range(dark.shape[0])]
+        solarfit = [solarfit[i,:] for i in range(solarfit.shape[0])]
+        spectra = pd.DataFrame(
+            {'spectra': spectra,
+             'wavelength': wavelength,
+             'raw': raw,
+             'corrected': corrected,
+             'dark': dark,
+             'solarfit': solarfit})
         
         # save this for later
         with open(newfile, 'wb') as f:
@@ -303,3 +353,10 @@ def initialize_MESSENERdata(datapath):
                                     {dpoint.lattan},
                                     {dpoint.loctimetan},
                                     '{dpoint.slit}')''')
+            for i, spec in spectra.iterrows():
+                cur.execute(f'''INSERT into {sp}spectra (spectra wavelength,
+                                    raw, corrected, dark, solarfit) values (
+                                    %s, %s, %s, %s, %s, %s''',
+                            (spec.spectra.tolist(), spec.wavelength.tolist(),
+                             spec.raw.tolist(), spec.corrected.tolist(),
+                             spec.dark.tolist(), spec.solarfit.tolist()))
