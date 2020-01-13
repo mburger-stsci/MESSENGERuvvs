@@ -320,12 +320,19 @@ class MESSENGERdata:
 
         # TAA needs to match the data
         oldtaa = inputs.geometry.taa
-        if len(set(self.data.orbit.tolist())) == 1:
+        if len(self.data.orbit.unique()) == 1:
             inputs.geometry.taa = np.median(self.data.taa)*u.rad
-        elif np.max(self.data.taa)-np.min(self.data.taa) < 3*np.pi/180.:
-            inputs.geometry.taa = np.median(self.data.taa)*u.rad
+        elif self.data.taa.max()-self.data.taa.min() < 3*np.pi/180.:
+            inputs.geometry.taa = self.data.taa.median()*u.rad
         else:
             assert 0, 'Too wide a range of taa'
+            
+        # If using a planet-fixed source map, need to set subsolarlon
+        if ((inputs.spatialdist.type == 'surface map') and
+            (inputs.spatialdist.coordinate_system == 'planet-fixed')):
+            inputs.spatialdist.subsolarlon = self.data.subslong.median()*u.rad
+        else:
+            pass
 
         # Run the model
         inputs.run(npackets, overwrite=overwrite)
@@ -412,10 +419,11 @@ class MESSENGERdata:
         
         # Add error bars
         fig.add_layout(Whisker(source=source, base='utc', upper='upper',
-                             lower='lower'))
+                               lower='lower'))
 
         # tool tips
-        tips = [('index', '$index'), ('UTC', '@utcstr'),
+        tips = [('index', '$index'),
+                ('UTC', '@utcstr'),
                 ('Radiance', '@radiance{0.2f} kR')]
         if  self.model_label is not None:
             for modkey, modlabel in self.model_label.items():
@@ -435,9 +443,9 @@ class MESSENGERdata:
                     c = next(col)
 
                 f = fig.line(x='utc', y=modkey, source=source,
-                               legend=modlabel, color=c)
+                               legend_label=modlabel, color=c)
                 f = fig.circle(x='utc', y=modkey, size=7, source=source,
-                               legend=modlabel, color=c)
+                               legend_label=modlabel, color=c)
                 datahover.renderers.append(f)
                 print(modlabel)
 
