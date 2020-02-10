@@ -415,7 +415,8 @@ class MESSENGERdata:
 
         # plot the data
         dplot = fig.circle(x='utc', y='radiance', size=7, color='black',
-                           legend='Data', hover_color='white', source=source)
+                           legend_label='Data', hover_color='white',
+                           source=source)
         
         # Add error bars
         fig.add_layout(Whisker(source=source, base='utc', upper='upper',
