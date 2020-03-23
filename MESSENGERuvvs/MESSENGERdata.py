@@ -1,5 +1,6 @@
 """MESSENGER UVVS data class"""
 import numpy as np
+from scipy.optimize import minimize_scalar
 import pandas as pd
 import bokeh.plotting as bkp
 from bokeh.models import HoverTool, Whisker
@@ -178,8 +179,7 @@ class MESSENGERdata:
         self.data = None
         self.taa = None
         self.inputs = None
-        self.model_strength = None
-        self.model_label = None
+        self.model_info = None
         
         if species is None:
             pass
@@ -203,9 +203,9 @@ class MESSENGERdata:
             try:
                 with database_connect() as con:
                     data = pd.read_sql(query, con)
-            except:
-                raise Input('MESSENGERdata.__init__',
-                            'Problem with comparisons given.')
+            except Exception:
+                raise InputError('MESSENGERdata.__init__',
+                                 'Problem with comparisons given.')
 
             if len(data) > 0:
                 self.species = species
@@ -237,7 +237,7 @@ class MESSENGERdata:
     def __len__(self):
         try:
             return len(self.data)
-        except:
+        except Exception:
             return 0
 
     def __getitem__(self, q_):
@@ -256,8 +256,7 @@ class MESSENGERdata:
         new.query = self.query
         new.taa = self.taa
         new.data = self.data.iloc[q].copy()
-        new.model_strength = self.model_strength
-        new.model_label = self.model_label
+        new.model_info = self.model_info
         new.inputs = self.inputs
 
         return new
@@ -309,7 +308,8 @@ class MESSENGERdata:
             assert 0, 'You somehow picked a bad combination.'
 
     def model(self, inputs_, npackets, quantity='radiance',
-              dphi=3*u.deg, overwrite=False, filenames=None, label=None):
+              fit_method='middle50', dphi=3*u.deg, overwrite=False,
+              filenames=None, label=None):
 
         if isinstance(inputs_, str):
             inputs = Input(inputs_)
@@ -353,38 +353,49 @@ class MESSENGERdata:
         packkey = f'packets{len(self.inputs)-1:00d}'
         self.data[modkey] = model_result.radiance/1e3 # Convert to kR
         self.data[packkey] = model_result.packets
-
-        # Estimate model strength (source rate) by mean of middle 50%
-        interval = PercentileInterval(50)
-        lim = interval.get_limits(self.data.radiance)
-        mask = ((self.data.radiance >= lim[0]) &
-                (self.data.radiance <= lim[1]))
-
-        strunit = u.def_unit('10**26 atoms/s', 1e26/u.s)
-        m_data = np.mean(self.data.radiance[mask])
-        m_model = np.mean(self.data[modkey][mask])
-        model_strength = m_data/m_model * strunit * strunit
-        self.data[modkey] = self.data[modkey] * model_strength.value
-
-        if self.model_strength is None:
-            self.model_strength = {modkey: model_strength}
-        else:
-            self.model_strength[modkey] = model_strength
+        
+        strength, goodness_of_fit = self.fit_model(modkey, fit_method)
+        self.data[modkey] = self.data[modkey]*strength.value
 
         if label is None:
             label = modkey.capitalize()
         else:
             pass
-        
-        if self.model_label is None:
-            self.model_label = {modkey: label}
-        else:
-            self.model_label[modkey] = label
 
-        print(f'Model strength for {label} = {model_strength}')
+        model_info = {'fit_method': fit_method,
+                      'goodness-of-fit': goodness_of_fit,
+                      'strength': strength,
+                      'label': label}
+        if self.model_info is None:
+            self.model_info = {modkey: model_info}
+        else:
+            self.model_info[modkey] = model_info
+        
+        print(f'Model strength for {label} = {strength}')
 
         # Put the old TAA back in.
         inputs.geometry.taa = oldtaa
+    
+    def fit_model(self, modkey, fit_method):
+        def chisq(x):
+            return np.sum((self.data[mask].radiance -
+                           x * self.data[mask][modkey])**2 /
+                          self.data[mask].sigma[mask]**2)
+        
+        if fit_method.lower().startswith('middle'):
+            perinterval = float(fit_method[6:])
+            # Estimate model strength (source rate) by fitting middle %
+            interval = PercentileInterval(perinterval)
+            lim = interval.get_limits(self.data.radiance)
+            mask = ((self.data.radiance >= lim[0]) &
+                    (self.data.radiance <= lim[1]))
+    
+            strunit = u.def_unit('10**26 atoms/s', 1e26/u.s)
+            model_strength = minimize_scalar(chisq)
+            return model_strength.x * strunit, model_strength.fun
+        else:
+            raise InputError('MESSENGERdata.fit_model',
+                             f'fitmethod = {fit_method} not defined.')
 
     def plot(self, filename=None, show=True, **kwargs):
         if filename is not None:
@@ -426,29 +437,29 @@ class MESSENGERdata:
         tips = [('index', '$index'),
                 ('UTC', '@utcstr'),
                 ('Radiance', '@radiance{0.2f} kR')]
-        if  self.model_label is not None:
-            for modkey, modlabel in self.model_label.items():
-                tips.append((modlabel, f'@{modkey}{{0.2f}} kR'))
+        if self.model_info is not None:
+            for modkey, info in self.model_info.items():
+                tips.append((info['label'], f'@{info["strength"]}{{0.2f}} kR'))
         datahover = HoverTool(tooltips=tips,
                               renderers=[dplot])
         fig.add_tools(datahover)
 
         # Plot the model
         col = (c for c in Set1[9])
-        if self.model_label is not None:
-            for modkey, modlabel in self.model_label.items():
+        if self.model_info is not None:
+            for modkey, info in self.model_info.items():
                 try:
                     c = next(col)
                 except StopIteration:
                     col = (c for c in Set1[9])
                     c = next(col)
 
-                f = fig.line(x='utc', y=modkey, source=source,
-                               legend_label=modlabel, color=c)
-                f = fig.circle(x='utc', y=modkey, size=7, source=source,
-                               legend_label=modlabel, color=c)
-                datahover.renderers.append(f)
-                print(modlabel)
+                f0 = fig.line(x='utc', y=modkey, source=source,
+                               legend_label=info['label'], color=c)
+                f1 = fig.circle(x='utc', y=modkey, size=7, source=source,
+                               legend_label=info['label'], color=c)
+                datahover.renderers.append(f0)
+                datahover.renderers.append(f1)
 
         # Labels, etc.
         fig.title.align = 'center'
@@ -469,7 +480,7 @@ class MESSENGERdata:
         if show:
             bkp.show(fig)
 
-    def export(self, filename, columns=['utc', 'radiance']):
+    def export(self, filename, columns=('utc', 'radiance')):
         """Export data and models to a file.
         **Parameters**
         
@@ -489,9 +500,9 @@ class MESSENGERdata:
         No outputs.
         
         """
-        columns_ = columns.copy()
-        if self.model_label is not None:
-            columns_.extend(self.model_label.keys())
+        columns_ = list(columns)
+        if self.model_info is not None:
+            columns_.extend(self.model_info.keys())
         else:
             pass
         
