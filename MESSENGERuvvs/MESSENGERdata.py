@@ -480,6 +480,8 @@ class MESSENGERdata:
         if show:
             bkp.show(fig)
 
+        return fig
+
     def export(self, filename, columns=('utc', 'radiance')):
         """Export data and models to a file.
         **Parameters**
