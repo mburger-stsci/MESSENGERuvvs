@@ -308,8 +308,8 @@ class MESSENGERdata:
             assert 0, 'You somehow picked a bad combination.'
 
     def model(self, inputs_, npackets, quantity='radiance',
-              fit_method='middle50', dphi=3*u.deg, overwrite=False,
-              filenames=None, label=None):
+              fit_method='chisqmin', dphi=3*u.deg, overwrite=False,
+              masking=None, filenames=None, label=None):
 
         if isinstance(inputs_, str):
             inputs = Input(inputs_)
@@ -354,7 +354,7 @@ class MESSENGERdata:
         self.data[modkey] = model_result.radiance/1e3 # Convert to kR
         self.data[packkey] = model_result.packets
         
-        strength, goodness_of_fit = self.fit_model(modkey, fit_method)
+        strength, goodness_of_fit = self.fit_model(modkey, fit_method, masking)
         self.data[modkey] = self.data[modkey]*strength.value
 
         if label is None:
@@ -376,26 +376,51 @@ class MESSENGERdata:
         # Put the old TAA back in.
         inputs.geometry.taa = oldtaa
     
-    def fit_model(self, modkey, fit_method):
+    def fit_model(self, modkey, fit_method, masking):
         def chisq(x):
             return np.sum((self.data[mask].radiance -
                            x * self.data[mask][modkey])**2 /
-                          self.data[mask].sigma[mask]**2)
-        
-        if fit_method.lower().startswith('middle'):
-            perinterval = float(fit_method[6:])
-            # Estimate model strength (source rate) by fitting middle %
-            interval = PercentileInterval(perinterval)
-            lim = interval.get_limits(self.data.radiance)
-            mask = ((self.data.radiance >= lim[0]) &
-                    (self.data.radiance <= lim[1]))
-    
-            strunit = u.def_unit('10**26 atoms/s', 1e26/u.s)
+                          self.data[mask].sigma[mask]**2)/(sum(mask) - 1)ld.s
+
+        def difference(x):
+            return np.abs(self.data[mask].radiance -
+                           x * self.data[mask][modkey])
+
+        mask = np.array([True for _ in self.data.radiance])
+        if masking is not None:
+            for masktype in masking.split(';'):
+                masktype = masktype.strip().lower()
+                if masktype.startswith('middle'):
+                    perinterval = float(masktype[6:])
+                    # Estimate model strength (source rate) by fitting middle %
+                    interval = PercentileInterval(perinterval)
+                    lim = interval.get_limits(self.data.radiance)
+                    mask = (mask &
+                            (self.data.radiance >= lim[0]) &
+                            (self.data.radiance <= lim[1]))
+                elif masktype.startswith('minalt'):
+                    minalt = float(masktype[6:])
+                    mask = mask & (self.data.alttan >= minalt)
+                elif masktype.startswith('minsnr'):
+                    minSNR = float(masktype[6:])
+                    snr = self.data.radiance / self.data.sigma
+                    mask = mask & (snr > minSNR)
+                else:
+                    raise InputError('MESSENGERdata.fit_model',
+                                     f'masking = {masktype} not defined.')
+        else:
+            pass
+
+        strunit = u.def_unit('10**26 atoms/s', 1e26/u.s)
+        if fit_method.lower() == 'chisqmin':
             model_strength = minimize_scalar(chisq)
-            return model_strength.x * strunit, model_strength.fun
+        elif fit_method.lower() == 'diffmin':
+            model_strength = minimize_scalar(difference)
         else:
             raise InputError('MESSENGERdata.fit_model',
-                             f'fitmethod = {fit_method} not defined.')
+                             f'fit_method = {fit_method} not defined.')
+        
+        return model_strength.x * strunit, model_strength.fun
 
     def plot(self, filename=None, show=True, **kwargs):
         if filename is not None:
