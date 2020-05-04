@@ -380,7 +380,7 @@ class MESSENGERdata:
         def chisq(x):
             return np.sum((self.data[mask].radiance -
                            x * self.data[mask][modkey])**2 /
-                          self.data[mask].sigma[mask]**2)/(sum(mask) - 1)ld.s
+                          self.data[mask].sigma[mask]**2)/(sum(mask) - 1)
 
         def difference(x):
             return np.abs(self.data[mask].radiance -
