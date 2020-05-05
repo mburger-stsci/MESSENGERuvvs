@@ -310,6 +310,42 @@ class MESSENGERdata:
     def model(self, inputs_, npackets, quantity='radiance',
               fit_method='chisqmin', dphi=3*u.deg, overwrite=False,
               masking=None, filenames=None, label=None):
+        """Run the nexoclom model with specified inputs and fit to the data.
+        
+        ** Parameters**
+        inputs
+            A nexoclom Input object or a string with the path to an inputs file.
+            
+        npackets
+            Number of packets to run.
+            
+        fit_method
+            Allows user to specify the quantity to be minimized when fitting
+            the model to the data. Default = chisqmin (chi-squared
+            minimization). Other option is 'difference' which minimizes the
+            sum of the differences of the data and the model ignoring the
+            data uncertainty.
+            
+        dphi
+            Angular size of the view cone. Default = 3 deg. Must be
+            given as an astropy quantity.
+            
+        overwrite
+            Set to True to erase any previous model runs with these inputs.
+            Default = False
+        
+        masking
+            Allows user to specify which data points are included in the fit
+            to the model. Default = None
+            * middleX: Use the middle X% of values. For example, middle50
+              excludes the faintest and brightest 25% spectra
+            
+            * minsnrX: specifies the minimum signal-to-noise ratio to use.
+              minsnr3 exludes any spectra with SNR < 3
+            
+            * siglimitX: Excludes any data where the model is not within X σ
+              of the data in an initial fit to the data.
+        """
 
         if isinstance(inputs_, str):
             inputs = Input(inputs_)
@@ -351,11 +387,13 @@ class MESSENGERdata:
         # modkey is the number for this model
         modkey = f'model{len(self.inputs)-1:00d}'
         packkey = f'packets{len(self.inputs)-1:00d}'
+        maskkey = f'mask{len(self.inputs)-1:00d}'
         self.data[modkey] = model_result.radiance/1e3 # Convert to kR
         self.data[packkey] = model_result.packets
         
-        strength, goodness_of_fit = self.fit_model(modkey, fit_method, masking)
+        strength, goodness_of_fit, mask = self.fit_model(modkey, fit_method, masking)
         self.data[modkey] = self.data[modkey]*strength.value
+        self.data[maskkey] = mask
 
         if label is None:
             label = modkey.capitalize()
@@ -378,15 +416,16 @@ class MESSENGERdata:
     
     def fit_model(self, modkey, fit_method, masking):
         def chisq(x):
-            return np.sum((self.data[mask].radiance -
+            return np.sum((self.data[mask]['radiance'] -
                            x * self.data[mask][modkey])**2 /
-                          self.data[mask].sigma[mask]**2)/(sum(mask) - 1)
+                          self.data[mask]['sigma']**2)/(sum(mask) - 1)
 
         def difference(x):
-            return np.abs(self.data[mask].radiance -
-                           x * self.data[mask][modkey])
+            return np.sum(np.abs(self.data[mask]['radiance'] -
+                                 x * self.data[mask][modkey]))
 
         mask = np.array([True for _ in self.data.radiance])
+        sigmalimit = None
         if masking is not None:
             for masktype in masking.split(';'):
                 masktype = masktype.strip().lower()
@@ -405,22 +444,32 @@ class MESSENGERdata:
                     minSNR = float(masktype[6:])
                     snr = self.data.radiance / self.data.sigma
                     mask = mask & (snr > minSNR)
+                elif masktype.startswith('siglimit'):
+                    sigmalimit = masktype
                 else:
                     raise InputError('MESSENGERdata.fit_model',
                                      f'masking = {masktype} not defined.')
         else:
             pass
-
+        
         strunit = u.def_unit('10**26 atoms/s', 1e26/u.s)
-        if fit_method.lower() == 'chisqmin':
-            model_strength = minimize_scalar(chisq)
-        elif fit_method.lower() == 'diffmin':
-            model_strength = minimize_scalar(difference)
+        available_fitfunctions = ['chisqmin', 'diffmin']
+        if fit_method.lower() in available_fitfunctions:
+            model_strength = minimize_scalar(fit_method.lower())
+            if sigmalimit is not None:
+                siglimit = float(sigmalimit[8:])
+                diff = ((self.data['radiance']-
+                         model_strength.x*self.data[modkey]) /
+                        self.data['sigma'])
+                mask = mask & (diff < siglimit*self.data['sigma'])
+                model_strength = minimize_scalar(fit_method.lower())
+            else:
+                pass
         else:
             raise InputError('MESSENGERdata.fit_model',
                              f'fit_method = {fit_method} not defined.')
         
-        return model_strength.x * strunit, model_strength.fun
+        return model_strength.x * strunit, model_strength.fun, mask
 
     def plot(self, filename=None, show=True, **kwargs):
         if filename is not None:
