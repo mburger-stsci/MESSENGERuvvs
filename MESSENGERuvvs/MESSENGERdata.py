@@ -3,13 +3,13 @@ import numpy as np
 from scipy.optimize import minimize_scalar
 import pandas as pd
 import bokeh.plotting as bkp
-from bokeh.models import HoverTool, Whisker
+from bokeh.models import HoverTool, Whisker, CDSView, BooleanFilter
 from bokeh.palettes import Set1
 from bokeh.io import export_png
 from astropy import units as u
 from astropy.visualization import PercentileInterval
 from .database_setup import database_connect
-from nexoclom import Input
+from nexoclom import Input, Output, LOSResult
 
 
 class InputError(Exception):
@@ -75,7 +75,7 @@ class MESSENGERdata:
     model_strength
         If *N* models have been run, this is a dictionary in the form
         `{'model0':strength0, ..., 'modelN':strengthN}` containing modeled
-        source rates in units of :math:`10^{26}` atoms/s.
+        source rates in units of :math:`10^{23}` atoms/s.
         
     **Examples**
     
@@ -212,6 +212,7 @@ class MESSENGERdata:
                 self.frame = data.frame[0]
                 self.query = comparisons
                 data.drop(['species', 'frame'], inplace=True, axis=1)
+                data.loc[data.alttan < 0, 'alttan'] = 1e10
                 self.data = data
                 self.data.set_index('unum', inplace=True)
                 self.taa = np.median(data.taa)
@@ -307,9 +308,9 @@ class MESSENGERdata:
         else:
             assert 0, 'You somehow picked a bad combination.'
 
-    def model(self, inputs_, npackets, quantity='radiance',
-              fit_method='chisqmin', dphi=3*u.deg, overwrite=False,
-              masking=None, filenames=None, label=None):
+    def model(self, start_from, npackets, quantity='radiance',
+              fit_method='chisq', dphi=3*u.deg, overwrite=False,
+              masking=None, filenames=None, label=None, savepackets=False):
         """Run the nexoclom model with specified inputs and fit to the data.
         
         ** Parameters**
@@ -321,7 +322,7 @@ class MESSENGERdata:
             
         fit_method
             Allows user to specify the quantity to be minimized when fitting
-            the model to the data. Default = chisqmin (chi-squared
+            the model to the data. Default = chisq (chi-squared
             minimization). Other option is 'difference' which minimizes the
             sum of the differences of the data and the model ignoring the
             data uncertainty.
@@ -347,10 +348,17 @@ class MESSENGERdata:
               of the data in an initial fit to the data.
         """
 
-        if isinstance(inputs_, str):
-            inputs = Input(inputs_)
-        elif hasattr(inputs_, 'line_of_sight'):
-            inputs = inputs_
+        runmodel = True
+        if isinstance(start_from, str):
+            inputs = Input(start_from)
+            output = None
+        elif isinstance(start_from, Input):
+            inputs = start_from
+            output = None
+        elif isinstance(start_from, Output):
+            inputs = start_from.inputs
+            output = start_from
+            runmodel = False
         else:
             raise InputError('MESSENGERdata.model', 'Problem with the inputs.')
 
@@ -371,7 +379,14 @@ class MESSENGERdata:
             pass
 
         # Run the model
-        inputs.run(npackets, overwrite=overwrite)
+        self.set_frame('Model')
+        if runmodel:
+            inputs.run(npackets, overwrite=overwrite)
+            model_result = LOSResult(inputs, self.data, quantity, dphi=dphi,
+                filenames=filenames, overwrite=overwrite, savepackets=savepackets)
+        else:
+            model_result = LOSResult(output, self.data, quantity, dphi=dphi,
+                filenames=filenames, overwrite=overwrite, savepackets=savepackets)
 
         # Simulate the data
         if self.inputs is None:
@@ -379,18 +394,15 @@ class MESSENGERdata:
         else:
             self.inputs.append(inputs)
 
-        self.set_frame('Model')
-        model_result = inputs.line_of_sight(self.data, quantity,
-                                            dphi=dphi, filenames=filenames,
-                                            overwrite=overwrite)
-        
         # modkey is the number for this model
         modkey = f'model{len(self.inputs)-1:00d}'
         packkey = f'packets{len(self.inputs)-1:00d}'
+        npackkey = f'npackets{len(self.inputs)-1:00d}'
         maskkey = f'mask{len(self.inputs)-1:00d}'
         self.data[modkey] = model_result.radiance/1e3 # Convert to kR
-        self.data[packkey] = model_result.packets
-        
+        self.data[npackkey] = model_result.packets
+        self.data[packkey] = model_result.saved_packets
+
         strength, goodness_of_fit, mask = self.fit_model(modkey, fit_method, masking)
         self.data[modkey] = self.data[modkey]*strength.value
         self.data[maskkey] = mask
@@ -452,17 +464,22 @@ class MESSENGERdata:
         else:
             pass
         
-        strunit = u.def_unit('10**26 atoms/s', 1e26/u.s)
-        available_fitfunctions = ['chisqmin', 'diffmin']
-        if fit_method.lower() in available_fitfunctions:
-            model_strength = minimize_scalar(fit_method.lower())
+        strunit = u.def_unit('10**23 atoms/s', 1e23/u.s)
+        available_fitfunctions = ['chisq', 'difference']
+        if np.any(mask) == False:
+            mask_ = mask.copy()
+            mask[:] = True
+            model_strength = minimize_scalar(difference)
+            mask = mask_
+        elif fit_method.lower() in available_fitfunctions:
+            model_strength = minimize_scalar(eval(fit_method.lower()))
             if sigmalimit is not None:
                 siglimit = float(sigmalimit[8:])
                 diff = ((self.data['radiance']-
                          model_strength.x*self.data[modkey]) /
                         self.data['sigma'])
                 mask = mask & (diff < siglimit*self.data['sigma'])
-                model_strength = minimize_scalar(fit_method.lower())
+                model_strength = minimize_scalar(eval(fit_method.lower()))
             else:
                 pass
         else:
@@ -510,10 +527,8 @@ class MESSENGERdata:
         # tool tips
         tips = [('index', '$index'),
                 ('UTC', '@utcstr'),
-                ('Radiance', '@radiance{0.2f} kR')]
-        if self.model_info is not None:
-            for modkey, info in self.model_info.items():
-                tips.append((info['label'], f'@{info["strength"]}{{0.2f}} kR'))
+                ('Radiance', '@radiance{0.2f} kR'),
+                ('alttan', '@alttan{0.f} km')]
         datahover = HoverTool(tooltips=tips,
                               renderers=[dplot])
         fig.add_tools(datahover)
@@ -528,10 +543,16 @@ class MESSENGERdata:
                     col = (c for c in Set1[9])
                     c = next(col)
 
+                label = f"{info['label']}, {info['strength'].value:0.2f} * 10**23 atoms/s"
                 f0 = fig.line(x='utc', y=modkey, source=source,
-                               legend_label=info['label'], color=c)
+                              legend_label=label, color=c)
+                f2 = fig.circle(x='utc', y=modkey, size=7, source=source,
+                                legend_label=label, color=c)
+                maskkey = modkey.replace('model', 'mask')
+                mask = np.logical_not(self.data[maskkey]).to_list()
+                view = CDSView(source=source, filters=[BooleanFilter(mask)])
                 f1 = fig.circle(x='utc', y=modkey, size=7, source=source,
-                               legend_label=info['label'], color=c)
+                                line_color=c, fill_color='yellow', view=view)
                 datahover.renderers.append(f0)
                 datahover.renderers.append(f1)
 
@@ -547,7 +568,6 @@ class MESSENGERdata:
             bkp.output_file(filename)
             export_png(fig, filename=filename.replace('.html', '.png'))
             bkp.save(fig)
-            
         else:
             pass
 
