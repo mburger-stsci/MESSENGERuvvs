@@ -400,8 +400,10 @@ class MESSENGERdata:
         npackkey = f'npackets{len(self.inputs)-1:00d}'
         maskkey = f'mask{len(self.inputs)-1:00d}'
         self.data[modkey] = model_result.radiance/1e3 # Convert to kR
-        self.data[npackkey] = model_result.packets
-        self.data[packkey] = model_result.saved_packets
+        self.data[npackkey] = model_result.ninview
+        if savepackets:
+            for c, col in model_result.packets.iteritems():
+                self.data[f'{packkey}-{c}'] = col.values
 
         strength, goodness_of_fit, mask = self.fit_model(modkey, fit_method, masking)
         self.data[modkey] = self.data[modkey]*strength.value
@@ -513,6 +515,7 @@ class MESSENGERdata:
                          title=f'{self.species}, {self.query}',
                          x_axis_label='UTC',
                          y_axis_label='Radiance (kR)',
+                         y_range=[0, self.data.radiance.max()*1.5],
                          tools=['pan', 'box_zoom', 'reset', 'save'])
 
         # plot the data
