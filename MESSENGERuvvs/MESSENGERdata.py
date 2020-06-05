@@ -516,7 +516,7 @@ class MESSENGERdata:
                          x_axis_label='UTC',
                          y_axis_label='Radiance (kR)',
                          y_range=[0, self.data.radiance.max()*1.5],
-                         tools=['pan', 'box_zoom', 'reset', 'save'])
+                         tools=['pan', 'box_zoom', 'wheel_zoom', 'reset', 'save'])
 
         # plot the data
         dplot = fig.circle(x='utc', y='radiance', size=7, color='black',
