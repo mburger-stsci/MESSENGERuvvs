@@ -534,7 +534,7 @@ class MESSENGERdata:
         m = self.data[self.data.alttan != self.data.alttan.max()].alttan.max()
         col = np.interp(self.data.alttan, np.linspace(0, m, 256),
                         np.arange(256)).astype(int)
-        source.add([Turbo256[c] for c in col], name='color')
+        source.add([Turbo256[c] for c in np.floor(col)], name='color')
     
         color_mapper = LinearColorMapper(palette="Turbo256", low=0, high=m)
     
