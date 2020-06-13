@@ -1,19 +1,24 @@
 """MESSENGER UVVS data class"""
 import numpy as np
-from scipy.optimize import minimize_scalar
 import pandas as pd
-import bokeh.plotting as bkp
-from bokeh.models import HoverTool, Whisker, CDSView, BooleanFilter
-from bokeh.palettes import Set1
-from bokeh.io import export_png
 from astropy import units as u
-from astropy.visualization import PercentileInterval
-from .database_setup import database_connect
+
+import bokeh.plotting as bkp
+from bokeh.models import (HoverTool, Whisker, CDSView, BooleanFilter,
+                          ColorBar, LinearColorMapper)
+from bokeh.models.tickers import SingleIntervalTicker, DatetimeTicker
+from bokeh.layouts import column
+from bokeh.palettes import Set1, Turbo256
+from bokeh.io import export_png, curdoc
+from bokeh.themes import Theme
+
 from nexoclom import Input, Output, LOSResult
+from .database_setup import database_connect
+from mathMB import fit_model
 
 
 class InputError(Exception):
-    """Raised when a required parameter is not included in the inputfile."""
+    """Raised when a required parameter is not included."""
     def __init__(self, expression, message):
         self.expression = expression
         self.message = message
@@ -277,20 +282,20 @@ class MESSENGERdata:
 
         More frames could be added if necessary.
         If Frame is not specified, flips between MSO and Model."""
-        if (frame is None) and (self.frame == 'MSO'):
+        if (frame is None) and (self.frame.upper() == 'MSO'):
             frame = 'Model'
-        elif (frame is None) and (self.frame == 'Model'):
+        elif (frame is None) and (self.frame.upper() == 'MODEL'):
             frame = 'MSO'
         else:
             pass
 
-        allframes = ['Model', 'MSO']
-        if frame not in allframes:
+        allframes = ['MODEL', 'MSO']
+        if frame.upper() not in allframes:
             print('{} is not a valid frame.'.format(frame))
             return None
         elif frame == self.frame:
             pass
-        elif (self.frame == 'MSO') and (frame == 'Model'):
+        elif (self.frame.upper() == 'MSO') and (frame.upper() == 'MODEL'):
             # Convert from MSO to Model
             self.data.x, self.data.y = self.data.y.copy(), -self.data.x.copy()
             self.data.xbore, self.data.ybore = (self.data.ybore.copy(),
@@ -298,7 +303,7 @@ class MESSENGERdata:
             self.data.xtan, self.data.ytan = (self.data.ytan.copy(),
                                               -self.data.xtan.copy())
             self.frame = 'Model'
-        elif (self.frame == 'Model') and (frame == 'MSO'):
+        elif (self.frame.upper() == 'MODEL') and (frame.upper() == 'MODEL'):
             self.data.x, self.data.y = -self.data.y.copy(), self.data.x.copy()
             self.data.xbore, self.data.ybore = (-self.data.ybore.copy(),
                                                 self.data.xbore.copy())
@@ -310,7 +315,8 @@ class MESSENGERdata:
 
     def model(self, start_from, npackets, quantity='radiance',
               fit_method='chisq', dphi=3*u.deg, overwrite=False,
-              masking=None, filenames=None, label=None, savepackets=False):
+              masking=None, filenames=None, label=None,
+              fit_to_data=False):
         """Run the nexoclom model with specified inputs and fit to the data.
         
         ** Parameters**
@@ -382,11 +388,14 @@ class MESSENGERdata:
         self.set_frame('Model')
         if runmodel:
             inputs.run(npackets, overwrite=overwrite)
-            model_result = LOSResult(inputs, self.data, quantity, dphi=dphi,
-                filenames=filenames, overwrite=overwrite, savepackets=savepackets)
+            model_result = LOSResult(inputs, self, quantity, dphi=dphi,
+                                     filenames=filenames, overwrite=overwrite,
+                                     masking=masking, fit_to_data=fit_to_data)
         else:
-            model_result = LOSResult(output, self.data, quantity, dphi=dphi,
-                filenames=filenames, overwrite=overwrite, savepackets=savepackets)
+            model_result = LOSResult(output, self, quantity, dphi=dphi,
+                                     filenames=filenames, overwrite=overwrite,
+                                     fit_method=fit_method, masking=masking,
+                                     fit_to_data=fit_to_data)
 
         # Simulate the data
         if self.inputs is None:
@@ -396,16 +405,19 @@ class MESSENGERdata:
 
         # modkey is the number for this model
         modkey = f'model{len(self.inputs)-1:00d}'
-        packkey = f'packets{len(self.inputs)-1:00d}'
         npackkey = f'npackets{len(self.inputs)-1:00d}'
         maskkey = f'mask{len(self.inputs)-1:00d}'
         self.data[modkey] = model_result.radiance/1e3 # Convert to kR
         self.data[npackkey] = model_result.ninview
-        if savepackets:
-            for c, col in model_result.packets.iteritems():
-                self.data[f'{packkey}-{c}'] = col.values
 
-        strength, goodness_of_fit, mask = self.fit_model(modkey, fit_method, masking)
+        strength, goodness_of_fit, mask = fit_model(self.data.radiance.values,
+                                                    self.data[modkey].values,
+                                                    self.data.sigma.values,
+                                                    fit_method=fit_method,
+                                                    masking=masking,
+                                                    altitude=self.data.alttan)
+        strength *= u.def_unit('10**23 atoms/s', 1e23/u.s)
+        
         self.data[modkey] = self.data[modkey]*strength.value
         self.data[maskkey] = mask
 
@@ -417,7 +429,9 @@ class MESSENGERdata:
         model_info = {'fit_method': fit_method,
                       'goodness-of-fit': goodness_of_fit,
                       'strength': strength,
-                      'label': label}
+                      'label': label,
+                      'filenames': model_result.filenames,
+                      'fitted': model_result.fitted}
         if self.model_info is None:
             self.model_info = {modkey: model_info}
         else:
@@ -428,69 +442,9 @@ class MESSENGERdata:
         # Put the old TAA back in.
         inputs.geometry.taa = oldtaa
     
-    def fit_model(self, modkey, fit_method, masking):
-        def chisq(x):
-            return np.sum((self.data[mask]['radiance'] -
-                           x * self.data[mask][modkey])**2 /
-                          self.data[mask]['sigma']**2)/(sum(mask) - 1)
-
-        def difference(x):
-            return np.sum(np.abs(self.data[mask]['radiance'] -
-                                 x * self.data[mask][modkey]))
-
-        mask = np.array([True for _ in self.data.radiance])
-        sigmalimit = None
-        if masking is not None:
-            for masktype in masking.split(';'):
-                masktype = masktype.strip().lower()
-                if masktype.startswith('middle'):
-                    perinterval = float(masktype[6:])
-                    # Estimate model strength (source rate) by fitting middle %
-                    interval = PercentileInterval(perinterval)
-                    lim = interval.get_limits(self.data.radiance)
-                    mask = (mask &
-                            (self.data.radiance >= lim[0]) &
-                            (self.data.radiance <= lim[1]))
-                elif masktype.startswith('minalt'):
-                    minalt = float(masktype[6:])
-                    mask = mask & (self.data.alttan >= minalt)
-                elif masktype.startswith('minsnr'):
-                    minSNR = float(masktype[6:])
-                    snr = self.data.radiance / self.data.sigma
-                    mask = mask & (snr > minSNR)
-                elif masktype.startswith('siglimit'):
-                    sigmalimit = masktype
-                else:
-                    raise InputError('MESSENGERdata.fit_model',
-                                     f'masking = {masktype} not defined.')
-        else:
-            pass
-        
-        strunit = u.def_unit('10**23 atoms/s', 1e23/u.s)
-        available_fitfunctions = ['chisq', 'difference']
-        if np.any(mask) == False:
-            mask_ = mask.copy()
-            mask[:] = True
-            model_strength = minimize_scalar(difference)
-            mask = mask_
-        elif fit_method.lower() in available_fitfunctions:
-            model_strength = minimize_scalar(eval(fit_method.lower()))
-            if sigmalimit is not None:
-                siglimit = float(sigmalimit[8:])
-                diff = ((self.data['radiance']-
-                         model_strength.x*self.data[modkey]) /
-                        self.data['sigma'])
-                mask = mask & (diff < siglimit*self.data['sigma'])
-                model_strength = minimize_scalar(eval(fit_method.lower()))
-            else:
-                pass
-        else:
-            raise InputError('MESSENGERdata.fit_model',
-                             f'fit_method = {fit_method} not defined.')
-        
-        return model_strength.x * strunit, model_strength.fun, mask
-
     def plot(self, filename=None, show=True, **kwargs):
+        curdoc().theme = Theme('bokeh.yml')
+    
         if filename is not None:
             if not filename.endswith('.html'):
                 filename += '.html'
@@ -499,85 +453,127 @@ class MESSENGERdata:
             bkp.output_file(filename)
         else:
             pass
-
+    
         # Format the date correction
         self.data['utcstr'] = self.data['utc'].apply(
-            lambda x: x.isoformat()[0:19])
-
+                lambda x:x.isoformat()[0:19])
+    
         # Put the dataframe in a useable form
-        self.data['lower'] = self.data.radiance - self.data.sigma
-        self.data['upper'] = self.data.radiance + self.data.sigma
+        self.data['lower'] = self.data.radiance-self.data.sigma
+        self.data['upper'] = self.data.radiance+self.data.sigma
+        self.data['lattandeg'] = self.data.lattan*180/np.pi
+    
         source = bkp.ColumnDataSource(self.data)
-
-        # Make the figure
-        fig = bkp.figure(plot_width=1200, plot_height=800,
-                         x_axis_type='datetime',
-                         title=f'{self.species}, {self.query}',
-                         x_axis_label='UTC',
-                         y_axis_label='Radiance (kR)',
-                         y_range=[0, self.data.radiance.max()*1.5],
-                         tools=['pan', 'box_zoom', 'wheel_zoom', 'reset', 'save'])
-
-        # plot the data
-        dplot = fig.circle(x='utc', y='radiance', size=7, color='black',
-                           legend_label='Data', hover_color='white',
-                           source=source)
-        
-        # Add error bars
-        fig.add_layout(Whisker(source=source, base='utc', upper='upper',
-                               lower='lower'))
-
+    
+        # Tools
+        tools = ['pan', 'box_zoom', 'wheel_zoom', 'xbox_select',
+                 'hover', 'reset', 'save']
+    
         # tool tips
         tips = [('index', '$index'),
                 ('UTC', '@utcstr'),
                 ('Radiance', '@radiance{0.2f} kR'),
-                ('alttan', '@alttan{0.f} km')]
-        datahover = HoverTool(tooltips=tips,
-                              renderers=[dplot])
-        fig.add_tools(datahover)
-
+                ('LTtan', '@loctimetan{2.1f} hr'),
+                ('Lattan', '@lattandeg{3.1f} deg'),
+                ('Alttan', '@alttan{0.f} km')]
+    
+        # Make the figure
+        width, height = 1200, 600
+        fig0 = bkp.figure(plot_width=width, plot_height=height,
+                          x_axis_type='datetime',
+                          title=f'{self.species}, {self.query}',
+                          x_axis_label='UTC',
+                          y_axis_label='Radiance (kR)',
+                          y_range=[0, self.data.radiance.max()*1.5],
+                          tools=tools)
+    
+        # plot the data
+        dplot = fig0.circle(x='utc', y='radiance', size=7, color='black',
+                            legend_label='Data', hover_color='yellow',
+                            source=source, selection_color='orange')
+        fig0.line(x='utc', y='radiance', color='black', legend_label='Data',
+                  source=source)
+        fig0.xaxis.ticker = DatetimeTicker(num_minor_ticks=5)
+    
+        # Add error bars
+        fig0.add_layout(Whisker(source=source, base='utc', upper='upper',
+                                lower='lower'))
+        renderers = [dplot]
+    
         # Plot the model
         col = (c for c in Set1[9])
         if self.model_info is not None:
+            modplots, maskedplots = [], []
             for modkey, info in self.model_info.items():
                 try:
                     c = next(col)
                 except StopIteration:
                     col = (c for c in Set1[9])
                     c = next(col)
-
+            
                 label = f"{info['label']}, {info['strength'].value:0.2f} * 10**23 atoms/s"
-                f0 = fig.line(x='utc', y=modkey, source=source,
-                              legend_label=label, color=c)
-                f2 = fig.circle(x='utc', y=modkey, size=7, source=source,
-                                legend_label=label, color=c)
+                fig0.line(x='utc', y=modkey, source=source,
+                          legend_label=label, color=c)
+                modplots.append(fig0.circle(x='utc', y=modkey, size=7, color=c,
+                                            source=source, legend_label=label))
                 maskkey = modkey.replace('model', 'mask')
                 mask = np.logical_not(self.data[maskkey]).to_list()
                 view = CDSView(source=source, filters=[BooleanFilter(mask)])
-                f1 = fig.circle(x='utc', y=modkey, size=7, source=source,
-                                line_color=c, fill_color='yellow', view=view)
-                datahover.renderers.append(f0)
-                datahover.renderers.append(f1)
-
-        # Labels, etc.
-        fig.title.align = 'center'
-        fig.title.text_font_size = '16pt'
-        fig.axis.axis_label_text_font_size = '16pt'
-        fig.axis.major_label_text_font_size = '16pt'
-        fig.legend.label_text_font_size = '16pt'
-        fig.legend.click_policy = 'hide'
-
+                maskedplots.append(fig0.circle(x='utc', y=modkey, size=7,
+                                               source=source, line_color=c,
+                                               fill_color='yellow', view=view,
+                                               legend_label=label))
+                renderers.extend(modplots)
+                renderers.extend(maskedplots)
+    
+        datahover = HoverTool(tooltips=tips, renderers=renderers)
+        fig0.add_tools(datahover)
+    
+        ##############
+        # Plot tangent point
+        m = self.data[self.data.alttan != self.data.alttan.max()].alttan.max()
+        col = np.interp(self.data.alttan, np.linspace(0, m, 256),
+                        np.arange(256)).astype(int)
+        source.add([Turbo256[c] for c in col], name='color')
+    
+        color_mapper = LinearColorMapper(palette="Turbo256", low=0, high=m)
+    
+        width, height = 1200, 600
+        tools = ['pan', 'box_zoom', 'wheel_zoom', 'box_select',
+                 'hover', 'reset', 'save']
+        fig1 = bkp.figure(plot_width=width, plot_height=height,
+                          title=f'Tangent Point Location',
+                          x_axis_label='Local Time (hr)',
+                          y_axis_label='Latitude (deg)',
+                          x_range=[0, 24],
+                          y_range=[-90, 90], tools=tools)
+        tanplot = fig1.circle(x='loctimetan', y='lattandeg', size=5,
+                              selection_color='orange', hover_color='purple',
+                              source=source, color='color')
+        fig1.xaxis.ticker = SingleIntervalTicker(interval=6,
+                                                 num_minor_ticks=6)
+        fig1.yaxis.ticker = SingleIntervalTicker(interval=45,
+                                                 num_minor_ticks=3)
+        color_bar = ColorBar(color_mapper=color_mapper, title='Altitude (km)',
+                             label_standoff=12, border_line_color=None,
+                             location=(0, 0))
+        fig1.add_layout(color_bar, 'right')
+        datahover = HoverTool(tooltips=tips, renderers=[tanplot])
+        fig1.add_tools(datahover)
+    
+        grid = column(fig0, fig1)
+    
         if filename is not None:
             bkp.output_file(filename)
-            export_png(fig, filename=filename.replace('.html', '.png'))
-            bkp.save(fig)
+            export_png(grid, filename=filename.replace('.html', '.png'))
+            bkp.save(grid)
         else:
             pass
-
+    
         if show:
-            bkp.show(fig)
-
-        return fig
+            bkp.show(grid)
+    
+        return fig0, fig1
 
     def export(self, filename, columns=('utc', 'radiance')):
         """Export data and models to a file.

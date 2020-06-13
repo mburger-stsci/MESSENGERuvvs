@@ -7,7 +7,7 @@ from .initialize_MESSENGERdata import initialize_MESSENGERdata
 name = 'MESSENGERuvvs'
 __author__ = 'Matthew Burger'
 __email__ = 'mburger@stsci.edu'
-__version__ = '1.2.18'
+__version__ = '1.3.0'
 
 
 messenger_database_setup()
