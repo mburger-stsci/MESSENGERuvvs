@@ -485,8 +485,8 @@ class MESSENGERdata:
                           x_axis_label='UTC',
                           y_axis_label='Radiance (kR)',
                           y_range=[0, self.data.radiance.max()*1.5],
-                          tools=tools)
-    
+                          tools=tools, active_drag = "xbox_select")
+
         # plot the data
         dplot = fig0.circle(x='utc', y='radiance', size=7, color='black',
                             legend_label='Data', hover_color='yellow',
@@ -546,7 +546,8 @@ class MESSENGERdata:
                           x_axis_label='Local Time (hr)',
                           y_axis_label='Latitude (deg)',
                           x_range=[0, 24],
-                          y_range=[-90, 90], tools=tools)
+                          y_range=[-90, 90], tools=tools,
+                          active_drag="box_select")
         tanplot = fig1.circle(x='loctimetan', y='lattandeg', size=5,
                               selection_color='orange', hover_color='purple',
                               source=source, color='color')
