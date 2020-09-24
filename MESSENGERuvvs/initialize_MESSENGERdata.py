@@ -93,7 +93,7 @@ def initialize_MESSENGERdata(datapath):
         cur.execute('select table_name from information_schema.tables')
         tables = [r[0] for r in cur.fetchall()]
 
-        mestables = ['capointing', 'cauvvsdata', 'mesmercyear', 'mgpointing',
+        mestables = ['capointing', 'cauvvsdata', 'mgpointing',
                      'mguvvsdata', 'napointing', 'nauvvsdata',
                      'caspectra', 'naspectra', 'mgspectra',
                      'uvvsmodels']
@@ -105,8 +105,8 @@ def initialize_MESSENGERdata(datapath):
             else:
                 pass
             
-        print('creating MESmercyear table')
-        merc_year(initialize=True)
+        # print('creating MESmercyear table')
+        # merc_year(initialize=True)
 
         print('creating UVVS tables')
         spec = ['Ca', 'Na', 'Mg']
@@ -155,31 +155,22 @@ def initialize_MESSENGERdata(datapath):
             cur.execute(f'''CREATE table {sp}spectra (
                                 snum SERIAL PRIMARY KEY,
                                 wavelength float[],
+                                calibrated float[],
                                 raw float[],
-                                corrected float[],
                                 dark float[],
                                 solarfit float[])''')
 
-        cur.execute('''CREATE TABLE uvvsmodels (
-                           idnum SERIAL PRIMARY KEY,
-                           out_idnum bigint,
-                           quantity text,
-                           orbit int,
-                           dphi float,
-                           mechanism text,
-                           wavelength text,
-                           filename text)''')
-        print('Created uvvsmodels table')
-    
-    savfiles = glob.glob(datapath+'/*.sav')
+    savfiles = glob.glob(datapath+'/*_temp.pkl')
     savfiles = sorted(savfiles)
     for oldfile in savfiles:
         # realfile = oldfile.replace('.sav', '_temp.pkl')
-        newfile = oldfile.replace('.sav', '.pkl')
-        print('{}\n{}\n***'.format(oldfile, newfile))
-        data = io.readsav(oldfile, python_dict=True)
+        # newfile = oldfile.replace('.sav', '.pkl')
+        newfile = oldfile.replace('_temp', '')
+        print(f'{oldfile}\n{newfile}\n***')
+        # data = io.readsav(oldfile, python_dict=True)
         # data = pickle.load(open(realfile, 'rb'))
-        
+        data = pickle.load(open(oldfile, 'rb'))
+
         kR = u.def_unit('kR', 1e3*u.R)
         Rmerc = u.def_unit('R_Mercury', mercury.radius)
         nm = u.def_unit('nm', 1e-9*u.m)
@@ -314,6 +305,7 @@ def initialize_MESSENGERdata(datapath):
         
         print('Inserting UVVS data')
         with database_connect() as con:
+            print(f'Saving {species} Data')
             for i, dpoint in ndata.iterrows():
                 cur.execute(f'''INSERT into {species}uvvsdata (
                                     species, frame, UTC, orbit, merc_year,
@@ -353,10 +345,12 @@ def initialize_MESSENGERdata(datapath):
                                     {dpoint.lattan},
                                     {dpoint.loctimetan},
                                     '{dpoint.slit}')''')
+                
+            print(f'Saving {species} Spectra')
             for i, spec in spectra.iterrows():
-                cur.execute(f'''INSERT into {sp}spectra (spectra wavelength,
-                                    raw, corrected, dark, solarfit) values (
-                                    %s, %s, %s, %s, %s, %s''',
-                            (spec.spectra.tolist(), spec.wavelength.tolist(),
-                             spec.raw.tolist(), spec.corrected.tolist(),
-                             spec.dark.tolist(), spec.solarfit.tolist()))
+                cur.execute(f'''INSERT into {species}spectra (wavelength,
+                                    calibrated, raw, dark, solarfit) values (
+                                    %s, %s, %s, %s, %s)''',
+                            (spec.wavelength.tolist(), spec.spectra.tolist(),
+                             spec.raw.tolist(), spec.dark.tolist(),
+                             spec.solarfit.tolist()))
