@@ -26,9 +26,10 @@ NLONBINS, NLATBINS, NVELBINS = 72, 36, 100
 WIDTH, HEIGHT = 1000, 500
 FONTSIZE, NUMFONTSIZE = '16pt', '12pt'
 
+BOKEH_THEME_FILE = os.path.join(os.path.dirname(__file__), 'data', 'bokeh.yml')
 
 def plot_bokeh(self, filename=None, show=True):
-    curdoc().theme = Theme('bokeh.yml')
+    curdoc().theme = Theme(BOKEH_THEME_FILE)
     
     if filename is not None:
         if not filename.endswith('.html'):
@@ -667,7 +668,7 @@ def frame_generator(self):
 
 
 def make_fitted_plot(self, result, filestart='fitted', show=True, ut=None):
-    curdoc().theme = Theme('bokeh.yml')
+    curdoc().theme = Theme(BOKEH_THEME_FILE)
     
     # Tools
     tools = ['save']
