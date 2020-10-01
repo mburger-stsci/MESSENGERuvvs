@@ -830,7 +830,7 @@ def make_fitted_plot(self, result, filestart='fitted', show=True, ut=None):
     export_png(grid, filename=filestart+'.png')
     
     bkp.output_file(filestart+'.html')
-    bkp.save(grid)
+    # bkp.save(grid)  # html files not needed
     
     if show:
         bkp.show(grid)
@@ -852,15 +852,13 @@ def plot_fitted(self, filestart=None, show=True, make_frames=False):
         # Compute results for each spectrum
         frames_result = frame_generator(self)
         allframes = frames_result['result']
-        framefiles = []
         for specnum, frame in allframes.iterrows():
             print(specnum)
             result = frame.to_dict()
             result['velocity'] = final_result['velocity']
             
-            framefile = f'{filestart}_{specnum}.png'
-            framefiles.append(framefile)
-            make_fitted_plot(self, result, framefile, False, ut=self.data.loc[specnum, 'utc'])
+            framefilestart = f'{filestart}_{specnum}.png'
+            make_fitted_plot(self, result, framefilestart, False, ut=self.data.loc[specnum, 'utc'])
         
         # Animate the frames
-        os.system(f'convert -delay 10 -quality 100 {filestart}_*.png {filestart}.mpeg')
+        os.system(f'convert -delay 10 -quality 100 {filestart}*.png {filestart}.mpeg')
