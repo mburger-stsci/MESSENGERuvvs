@@ -548,21 +548,22 @@ def make_final_source(self):
         # Final source information
         new_weight = weighting.weight.apply(
                 lambda x:x.mean() if x.shape[0] > 0 else 0.)
+        include = weighting.weight.apply(lambda x:len(x) > 0)
         if np.any(new_weight > 0):
             multiplier = new_weight.loc[output.X['Index']].values
             output.X.loc[:, 'frac'] = output.X.loc[:, 'frac']*multiplier
             output.X0.loc[:, 'frac'] = output.X0.loc[:, 'frac']*new_weight
             output.totalsource = np.sum(output.X0.frac)
             
-            loctime = np.append(loctime, output.X0.local_time)
-            latitude = np.append(latitude, output.X0.latitude)
-            velocity = np.append(velocity, np.sqrt(output.X0.vx**2 +
-                                                   output.X0.vy**2 +
-                                                   output.X0.vz**2))
-            weight = np.append(weight, output.X0.frac)
+            loctime = np.append(loctime, output.X0.loc[include].local_time)
+            latitude = np.append(latitude, output.X0.loc[include].latitude)
+            velocity = np.append(velocity, np.sqrt(output.X0.loc[include].vx**2 +
+                                                   output.X0.loc[include].vy**2 +
+                                                   output.X0.loc[include].vz**2))
+            weight = np.append(weight, output.X0.loc[include].frac)
         else:
             pass
-    
+
     # Produce the necessary histograms
     if len(loctime) > 0:
         velocity *= Mercury.radius.value
@@ -857,8 +858,9 @@ def plot_fitted(self, filestart=None, show=True, make_frames=False):
             result = frame.to_dict()
             result['velocity'] = final_result['velocity']
             
-            framefilestart = f'{filestart}_{specnum}.png'
-            make_fitted_plot(self, result, framefilestart, False, ut=self.data.loc[specnum, 'utc'])
+            framefilestart = f'{filestart}_{specnum}'
+            make_fitted_plot(self, result, framefilestart, False,
+                             ut=self.data.loc[specnum, 'utc'])
         
         # Animate the frames
         os.system(f'convert -delay 10 -quality 100 {filestart}*.png {filestart}.mpeg')
