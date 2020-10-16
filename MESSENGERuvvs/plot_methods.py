@@ -4,6 +4,8 @@ import pandas as pd
 import pickle
 from solarsystemMB import SSObject
 from nexoclom import Output
+from astropy.convolution import Gaussian2DKernel
+from astropy.convolution import convolve
 
 import bokeh.plotting as bkp
 from bokeh.models import (HoverTool, Whisker, CDSView, BooleanFilter,
@@ -101,18 +103,23 @@ def plot_bokeh(self, filename=None, show=True):
                 col = (c for c in Set1[9])
                 c = next(col)
             
-            label = f"{info['label']}, {info['strength'].value:0.2f} * 10**23 atoms/s"
+            label = f"{info['label']}"
             fig0.line(x='utc', y=modkey, source=source,
                       legend_label=label, color=c)
+            
+            maskkey = modkey.replace('model', 'mask')
+            mask = (self.data[maskkey]).to_list()
+            view = CDSView(source=source, filters=[BooleanFilter(mask)])
             modplots.append(fig0.circle(x='utc', y=modkey, size=7, color=c,
-                                        source=source, legend_label=label))
+                                        source=source, legend_label=label,
+                                        view=view))
             maskkey = modkey.replace('model', 'mask')
             mask = np.logical_not(self.data[maskkey]).to_list()
             view = CDSView(source=source, filters=[BooleanFilter(mask)])
             maskedplots.append(fig0.circle(x='utc', y=modkey, size=7,
                                            source=source, line_color=c,
                                            fill_color='yellow', view=view,
-                                           legend_label=label))
+                                           legend_label=label + ' (Data Point Not Used)'))
             renderers.extend(modplots)
             renderers.extend(maskedplots)
     
@@ -446,89 +453,93 @@ def plot_plotly(self, show=True):
     return app
 
 
-def get_radiance_source(self, nlonbins=72, nlatbins=36, nvelbins=100):
-    modkey = None
-    for key in self.model_info:
-        if self.model_info[key]['fitted']:
-            modkey = key
-        else:
-            pass
-        
-    '''Make source frames for each spectrum'''
-    Mercury = SSObject('Mercury')
-    model_info = self.model_info[modkey]
-    loctime, latitude = np.ndarray((0,)), np.ndarray((0,))
-    velocity, weight = np.ndarray((0,)), np.ndarray((0,))
-    
-    # Load the data from all available outputfiles
-    for outputfile, modelfile in model_info['savefile'].items():
-        output = Output.restore(outputfile)
-        with open(modelfile, 'rb') as f:
-            model_result = pickle.load(f)
-        assert len(model_result) == 4, 'Not a proper fitted model result.'
-        
-        _, _, weighting, packets = model_result
-        
-        # Final source information
-        new_weight = weighting.weight.apply(
-                lambda x:x.mean() if x.shape[0] > 0 else 0.)
-        if np.any(new_weight > 0):
-            multiplier = new_weight.loc[output.X['Index']].values
-            output.X.loc[:, 'frac'] = output.X.loc[:, 'frac']*multiplier
-            output.X0.loc[:, 'frac'] = output.X0.loc[:, 'frac']*new_weight
-            output.totalsource = np.sum(output.X0.frac)
-            
-            loctime = np.append(loctime, output.X0.local_time)
-            latitude = np.append(latitude, output.X0.latitude)
-            velocity = np.append(velocity, np.sqrt(output.X0.vx**2 +
-                                                   output.X0.vy**2 +
-                                                   output.X0.vz**2))
-            weight = np.append(weight, output.X0.frac)
-        else:
-            pass
-        
-    # Produce the necessary histograms
-    if len(loctime) > 0:
-        velocity *= Mercury.radius.value
-        latitude *= 180./np.pi
-        
-        # source used
-        source, xx, yy = np.histogram2d(loctime, latitude, weights=weight,
-                                        range=[[0, 24], [-90, 90]],
-                                        bins=(nlonbins, nlatbins))
-        v_source, v = np.histogram(velocity,
-                                   bins=np.arange(0, np.max(velocity), .1),
-                                   weights=weight)
-        v_source /= np.max(v_source)
-        
-        # packets available
-        packets, _, _ = np.histogram2d(loctime, latitude,
-                                       range=[[0, 24], [-90, 90]],
-                                       bins=(nlonbins, nlatbins))
-        v_packets, _ = np.histogram(velocity,
-                                    bins=np.arange(0, np.max(velocity), .1))
-        v_packets = v_packets/np.max(v_packets)
-        
-        # Make local_time, latitude, velocity the center of the bins
-        local_time = xx+(xx[1]-xx[0])/2.
-        latitude = yy+(yy[1]-yy[0])/2.
-        v = v+(v[1]-v[0])/2.
-
-        result = {'source':source, 'packets':packets,
-                  'local_time':local_time[:-1], 'latitude':latitude[:-1],
-                  'v_source':v_source, 'v_packets':v_packets, 'v':v[:-1]}
-    else:
-        local_time = np.linspace(0, 24, nlonbins, endpoint=False)
-        local_time += (local_time[1]-local_time[0])/2.
-        latitude = np.linspace(-90, 92, nlatbins, endpoint=False)
-        latitude += (local_time[1]-local_time[0])/2.
-        result = {'source':np.zeros((nlatbins, nlonbins)),
-                  'packets':np.zeros((nlatbins, nlonbins)),
-                  'local_time':local_time,
-                  'latitude':latitude,
-                  'v_source':np.zeros(10), 'v_packets':np.zeros(10),
-                  'v':np.linspace(0, 1, 10)}
-    return result
+# def get_radiance_source(self, nlonbins=72, nlatbins=36, nvelbins=100):
+#     modkey = None
+#     for key in self.model_info:
+#         if self.model_info[key]['fitted']:
+#             modkey = key
+#         else:
+#             pass
+#
+#     '''Make source frames for each spectrum'''
+#     Mercury = SSObject('Mercury')
+#     model_info = self.model_info[modkey]
+#     loctime, latitude = np.ndarray((0,)), np.ndarray((0,))
+#     velocity, weight = np.ndarray((0,)), np.ndarray((0,))
+#
+#     # Load the data from all available outputfiles
+#     for outputfile, modelfile in model_info['savefile'].items():
+#         output = Output.restore(outputfile)
+#         with open(modelfile, 'rb') as f:
+#             model_result = pickle.load(f)
+#         assert len(model_result) == 4, 'Not a proper fitted model result.'
+#
+#         _, _, weighting, packets = model_result
+#
+#         # Final source information
+#         new_weight = weighting.weight.apply(
+#                 lambda x:x.mean() if x.shape[0] > 0 else 0.)
+#         if np.any(new_weight > 0):
+#             multiplier = new_weight.loc[output.X['Index']].values
+#             output.X.loc[:, 'frac'] = output.X.loc[:, 'frac']*multiplier
+#             output.X0.loc[:, 'frac'] = output.X0.loc[:, 'frac']*new_weight
+#             output.totalsource = np.sum(output.X0.frac)
+#
+#             loctime = np.append(loctime, output.X0.local_time)
+#             latitude = np.append(latitude, output.X0.latitude)
+#             velocity = np.append(velocity, np.sqrt(output.X0.vx**2 +
+#                                                    output.X0.vy**2 +
+#                                                    output.X0.vz**2))
+#             weight = np.append(weight, output.X0.frac)
+#         else:
+#             pass
+#
+#     # Produce the necessary histograms
+#     if len(loctime) > 0:
+#         velocity *= Mercury.radius.value
+#         latitude *= 180./np.pi
+#
+#         # source used
+#         source, xx, yy = np.histogram2d(loctime, latitude, weights=weight,
+#                                         range=[[0, 24], [-90, 90]],
+#                                         bins=(nlonbins, nlatbins))
+#         v_source, v = np.histogram(velocity,
+#                                    bins=np.arange(0, np.max(velocity), .1),
+#                                    weights=weight)
+#         v_source /= np.max(v_source)
+#
+#         # packets available
+#         packets, _, _ = np.histogram2d(loctime, latitude,
+#                                        range=[[0, 24], [-90, 90]],
+#                                        bins=(nlonbins, nlatbins))
+#         v_packets, _ = np.histogram(velocity,
+#                                     bins=np.arange(0, np.max(velocity), .1))
+#         v_packets = v_packets/np.max(v_packets)
+#
+#         # Make local_time, latitude, velocity the center of the bins
+#         local_time = xx+(xx[1]-xx[0])/2.
+#         latitude = yy+(yy[1]-yy[0])/2.
+#         v = v+(v[1]-v[0])/2.
+#
+#         assert 0
+#         source = source/np.cos(latitude[:, np.newaxis]*np.pi/180)
+#         packets = packets/np.cos(latitude[:, np.newaxis]*np.pi/180)
+#
+#         result = {'source':source, 'packets':packets,
+#                   'local_time':local_time[:-1], 'latitude':latitude[:-1],
+#                   'v_source':v_source, 'v_packets':v_packets, 'v':v[:-1]}
+#     else:
+#         local_time = np.linspace(0, 24, nlonbins, endpoint=False)
+#         local_time += (local_time[1]-local_time[0])/2.
+#         latitude = np.linspace(-90, 92, nlatbins, endpoint=False)
+#         latitude += (local_time[1]-local_time[0])/2.
+#         result = {'source':np.zeros((nlatbins, nlonbins)),
+#                   'packets':np.zeros((nlatbins, nlonbins)),
+#                   'local_time':local_time,
+#                   'latitude':latitude,
+#                   'v_source':np.zeros(10), 'v_packets':np.zeros(10),
+#                   'v':np.linspace(0, 1, 10)}
+#     return result
 
 
 def make_final_source(self, nlonbins=72, nlatbins=36, nvelbins=100):
@@ -594,13 +605,18 @@ def make_final_source(self, nlonbins=72, nlatbins=36, nvelbins=100):
         v_packets = v_packets/np.max(v_packets)
 
         # Make local_time, latitude, velocity the center of the bins
-        local_time = xx+(xx[1]-xx[0])/2.
-        latitude = yy+(yy[1]-yy[0])/2.
-        v = v+(v[1]-v[0])/2.
-        
+        local_time = xx[:-1] + (xx[1]-xx[0])/2.
+        latitude = yy[:-1] + (yy[1]-yy[0])/2.
+        v = v[:-1] + (v[1]-v[0])/2.
+
+        # Correct for surface area
+        lat = np.cos(latitude*np.pi/180)
+        source = source/lat[np.newaxis,:]
+        packets = packets/lat[np.newaxis,:]
+
         result = {'source':source, 'packets':packets,
-                  'local_time':local_time[:-1], 'latitude':latitude[:-1],
-                  'v_source':v_source, 'v_packets':v_packets, 'velocity':v[:-1]}
+                  'local_time':local_time, 'latitude':latitude,
+                  'v_source':v_source, 'v_packets':v_packets, 'velocity':v}
     else:
         result = None
     
@@ -669,26 +685,40 @@ def frame_generator(self, nlonbins=72, nlatbins=36, nvelbins=100):
                 v_packets, _ = np.histogram(velocity, bins=nvelbins, range=[0, 10])
                 v_packets = v_packets/np.max(v_packets)
                 
+                # Make local_time, latitude, velocity the center of the bins
+                local_time = xx[:-1] + (xx[1]-xx[0])/2.
+                latitude = yy[:-1] + (yy[1]-yy[0])/2.
+                v = v[:-1] + (v[1]-v[0])/2.
+                
+                # Correct for surface area
+                lat = np.cos(latitude*np.pi/180)
+                source = source/lat[np.newaxis, :]
+                packets = packets/lat[np.newaxis, :]
+
                 allframes.loc[specnum] = {'source':source,
                                           'packets':packets,
                                           'v_source':v_source,
                                           'v_packets':v_packets}
-                
-                # Make local_time, latitude, velocity the center of the bins
-                local_time = xx + (xx[1]-xx[0])/2.
-                latitude = yy + (yy[1]-yy[0])/2.
-                v = v + (v[1]-v[0])/2.
             else:
                 pass
     
-    results = {'local_time':local_time[:-1], 'latitude':latitude[:-1], 'velocity':v[:-1],
+    results = {'local_time':local_time, 'latitude':latitude, 'velocity':v[:-1],
                'result':allframes} if xx is not None else None
     
     return results
 
 
-def make_fitted_plot(self, result, filestart='fitted', show=True, ut=None):
+def make_fitted_plot(self, result, filestart='fitted', show=True, ut=None,
+                     smooth=False):
     curdoc().theme = Theme(BOKEH_THEME_FILE)
+    
+    if smooth:
+        kernel = Gaussian2DKernel(x_stddev=1)
+        source = convolve(result['source'], kernel)
+        packets = convolve(result['packets'], kernel)
+    else:
+        source = result['source']
+        packets = result['packets']
     
     # Tools
     tools = ['save']
@@ -708,7 +738,7 @@ def make_fitted_plot(self, result, filestart='fitted', show=True, ut=None):
     fig0.xaxis.ticker = FixedTicker(ticks=[0, 6, 12, 18, 24])
     fig0.yaxis.ticker = FixedTicker(ticks=[-90, 45, 0, 45, 90])
     
-    fig0.image(image=[result['packets'].transpose()],
+    fig0.image(image=[packets.transpose()],
                x=0, y=-90, dw=24, dh=180, palette='Spectral11')
     
     # Distribution of packets used in the final model
@@ -726,7 +756,7 @@ def make_fitted_plot(self, result, filestart='fitted', show=True, ut=None):
     fig1.xaxis.ticker = FixedTicker(ticks=[0, 6, 12, 18, 24])
     fig1.yaxis.ticker = FixedTicker(ticks=[-90, 45, 0, 45, 90])
     
-    fig1.image(image=[result['source'].transpose()],
+    fig1.image(image=[source.transpose()],
                x=0, y=-90, dw=24, dh=180, palette='Spectral11')
     
     fig2 = bkp.figure(plot_width=WIDTH, plot_height=HEIGHT,
@@ -819,18 +849,24 @@ def make_fitted_plot(self, result, filestart='fitted', show=True, ut=None):
                     col = (c for c in Set1[9])
                     c = next(col)
                 
-                label = f"{info['label']}, {info['strength'].value:0.2f} * 10**23 atoms/s"
+                label = f"{info['label']}"
                 fig3.line(x='utc', y=modkey, source=source,
                           legend_label=label, color=c)
+
+                maskkey = modkey.replace('model', 'mask')
+                mask = self.data[maskkey].to_list()
+                view = CDSView(source=source, filters=[BooleanFilter(mask)])
                 modplots.append(fig3.circle(x='utc', y=modkey, size=7, color=c,
-                                            source=source, legend_label=label))
+                                            source=source, legend_label=label,
+                                            view=view))
+                
                 maskkey = modkey.replace('model', 'mask')
                 mask = np.logical_not(self.data[maskkey]).to_list()
                 view = CDSView(source=source, filters=[BooleanFilter(mask)])
                 maskedplots.append(fig3.circle(x='utc', y=modkey, size=7,
                                                source=source, line_color=c,
                                                fill_color='yellow', view=view,
-                                               legend_label=label))
+                               legend_label=label + '(Data Point Not Used)'))
                 renderers.extend(modplots)
                 renderers.extend(maskedplots)
         
@@ -850,7 +886,7 @@ def make_fitted_plot(self, result, filestart='fitted', show=True, ut=None):
     export_png(grid, filename=filestart+'.png')
     
     bkp.output_file(filestart+'.html')
-    # bkp.save(grid)  # html files not needed
+    bkp.save(grid)  # html files not needed
     
     if show:
         bkp.show(grid)
@@ -860,7 +896,7 @@ def make_fitted_plot(self, result, filestart='fitted', show=True, ut=None):
     return grid
 
 
-def plot_fitted(self, filestart=None, show=True, make_frames=False):
+def plot_fitted(self, filestart=None, show=True, make_frames=False, smooth=False):
     # Check that the path exists
     if ((os.path.dirname(filestart) != '') and
         (not os.path.exists(os.path.dirname(filestart)))):
@@ -868,7 +904,8 @@ def plot_fitted(self, filestart=None, show=True, make_frames=False):
     
     # Compute and plot final source results
     final_result = make_final_source(self)
-    make_fitted_plot(self, final_result, filestart=filestart, show=show)
+    make_fitted_plot(self, final_result, filestart=filestart, show=show,
+                     smooth=smooth)
     
     if make_frames:
         # Compute results for each spectrum
@@ -881,7 +918,7 @@ def plot_fitted(self, filestart=None, show=True, make_frames=False):
             
             framefilestart = f'{filestart}_{specnum}'
             make_fitted_plot(self, result, framefilestart, False,
-                             ut=self.data.loc[specnum, 'utc'])
+                             ut=self.data.loc[specnum, 'utc'], smooth=smooth)
         
         # Animate the frames
         os.system(f'convert -delay 10 -quality 100 {filestart}*.png {filestart}.mpeg')
