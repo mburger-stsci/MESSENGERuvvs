@@ -22,7 +22,7 @@ import plotly.io as pio
 import plotly.graph_objects as go
 
 
-NLONBINS, NLATBINS, NVELBINS = 72, 36, 100
+# NLONBINS, NLATBINS, NVELBINS = 72, 36, 100
 WIDTH, HEIGHT = 1000, 500
 FONTSIZE, NUMFONTSIZE = '16pt', '12pt'
 
@@ -446,7 +446,7 @@ def plot_plotly(self, show=True):
     return app
 
 
-def get_radiance_source(self):
+def get_radiance_source(self, nlonbins=72, nlatbins=36, nvelbins=100):
     modkey = None
     for key in self.model_info:
         if self.model_info[key]['fitted']:
@@ -495,7 +495,7 @@ def get_radiance_source(self):
         # source used
         source, xx, yy = np.histogram2d(loctime, latitude, weights=weight,
                                         range=[[0, 24], [-90, 90]],
-                                        bins=(NLONBINS, NLATBINS))
+                                        bins=(nlonbins, nlatbins))
         v_source, v = np.histogram(velocity,
                                    bins=np.arange(0, np.max(velocity), .1),
                                    weights=weight)
@@ -504,25 +504,34 @@ def get_radiance_source(self):
         # packets available
         packets, _, _ = np.histogram2d(loctime, latitude,
                                        range=[[0, 24], [-90, 90]],
-                                       bins=(NLONBINS, NLATBINS))
+                                       bins=(nlonbins, nlatbins))
         v_packets, _ = np.histogram(velocity,
                                     bins=np.arange(0, np.max(velocity), .1))
         v_packets = v_packets/np.max(v_packets)
         
-        result = {'source':source.transpose(), 'packets':packets.transpose(),
-                  'x':xx[0:-1], 'y':yy[0:-1], 'v_source':v_source,
-                  'v_packets':v_packets, 'v':v[0:-1]}
+        # Make local_time, latitude, velocity the center of the bins
+        local_time = xx+(xx[1]-xx[0])/2.
+        latitude = yy+(yy[1]-yy[0])/2.
+        v = v+(v[1]-v[0])/2.
+
+        result = {'source':source, 'packets':packets,
+                  'local_time':local_time[:-1], 'latitude':latitude[:-1],
+                  'v_source':v_source, 'v_packets':v_packets, 'v':v[:-1]}
     else:
-        result = {'source':np.zeros((NLATBINS, NLONBINS)),
-                  'packets':np.zeros((NLATBINS, NLONBINS)),
-                  'x':np.linspace(0, 24, NLONBINS, endpoint=False),
-                  'y':np.linspace(-90, 92, NLATBINS, endpoint=False),
+        local_time = np.linspace(0, 24, nlonbins, endpoint=False)
+        local_time += (local_time[1]-local_time[0])/2.
+        latitude = np.linspace(-90, 92, nlatbins, endpoint=False)
+        latitude += (local_time[1]-local_time[0])/2.
+        result = {'source':np.zeros((nlatbins, nlonbins)),
+                  'packets':np.zeros((nlatbins, nlonbins)),
+                  'local_time':local_time,
+                  'latitude':latitude,
                   'v_source':np.zeros(10), 'v_packets':np.zeros(10),
                   'v':np.linspace(0, 1, 10)}
     return result
 
 
-def make_final_source(self):
+def make_final_source(self, nlonbins=72, nlatbins=36, nvelbins=100):
     modkey = None
     for key in self.model_info:
         if self.model_info[key]['fitted']:
@@ -572,28 +581,33 @@ def make_final_source(self):
         # source used
         source, xx, yy = np.histogram2d(loctime, latitude, weights=weight,
                                         range=[[0, 24], [-90, 90]],
-                                        bins=(NLONBINS, NLATBINS))
-        v_source, v = np.histogram(velocity, bins=NVELBINS, range=[0, 10],
+                                        bins=(nlonbins, nlatbins))
+        v_source, v = np.histogram(velocity, bins=nvelbins, range=[0, 10],
                                    weights=weight)
         v_source /= np.max(v_source)
         
         # packets available
         packets, _, _ = np.histogram2d(loctime, latitude,
                                        range=[[0, 24], [-90, 90]],
-                                       bins=(NLONBINS, NLATBINS))
-        v_packets, _ = np.histogram(velocity, bins=NVELBINS, range=[0, 10])
+                                       bins=(nlonbins, nlatbins))
+        v_packets, _ = np.histogram(velocity, bins=nvelbins, range=[0, 10])
         v_packets = v_packets/np.max(v_packets)
+
+        # Make local_time, latitude, velocity the center of the bins
+        local_time = xx+(xx[1]-xx[0])/2.
+        latitude = yy+(yy[1]-yy[0])/2.
+        v = v+(v[1]-v[0])/2.
         
-        result = {'source':source.transpose(), 'packets':packets.transpose(),
-                  'x':xx[:-1], 'y':yy[:-1], 'v_source':v_source,
-                  'v_packets':v_packets, 'velocity':v[:-1]}
+        result = {'source':source, 'packets':packets,
+                  'local_time':local_time[:-1], 'latitude':latitude[:-1],
+                  'v_source':v_source, 'v_packets':v_packets, 'velocity':v[:-1]}
     else:
         result = None
     
     return result
 
 
-def frame_generator(self):
+def frame_generator(self, nlonbins=72, nlatbins=36, nvelbins=100):
     '''Make source frames for each spectrum'''
     modkey = None
     for key in self.model_info:
@@ -642,27 +656,32 @@ def frame_generator(self):
                 # source used
                 source, xx, yy = np.histogram2d(loctime, latitude, weights=weight,
                                                 range=[[0, 24], [-90, 90]],
-                                                bins=(NLONBINS, NLATBINS))
+                                                bins=(nlonbins, nlatbins))
                 
-                v_source, v = np.histogram(velocity, bins=NVELBINS, range=[0, 10],
+                v_source, v = np.histogram(velocity, bins=nvelbins, range=[0, 10],
                                            weights=weight)
                 v_source /= np.max(v_source)
                 
                 # packets available
                 packets, _, _ = np.histogram2d(loctime, latitude,
                                                range=[[0, 24], [-90, 90]],
-                                               bins=(NLONBINS, NLATBINS))
-                v_packets, _ = np.histogram(velocity, bins=NVELBINS, range=[0, 10])
+                                               bins=(nlonbins, nlatbins))
+                v_packets, _ = np.histogram(velocity, bins=nvelbins, range=[0, 10])
                 v_packets = v_packets/np.max(v_packets)
                 
-                allframes.loc[specnum] = {'source':source.transpose(),
-                                          'packets':packets.transpose(),
+                allframes.loc[specnum] = {'source':source,
+                                          'packets':packets,
                                           'v_source':v_source,
                                           'v_packets':v_packets}
+                
+                # Make local_time, latitude, velocity the center of the bins
+                local_time = xx + (xx[1]-xx[0])/2.
+                latitude = yy + (yy[1]-yy[0])/2.
+                v = v + (v[1]-v[0])/2.
             else:
                 pass
     
-    results = {'localtime':xx[:-1], 'latitude':yy[:-1], 'velocity':v[:-1],
+    results = {'local_time':local_time[:-1], 'latitude':latitude[:-1], 'velocity':v[:-1],
                'result':allframes} if xx is not None else None
     
     return results
@@ -689,7 +708,7 @@ def make_fitted_plot(self, result, filestart='fitted', show=True, ut=None):
     fig0.xaxis.ticker = FixedTicker(ticks=[0, 6, 12, 18, 24])
     fig0.yaxis.ticker = FixedTicker(ticks=[-90, 45, 0, 45, 90])
     
-    fig0.image(image=[result['packets']],
+    fig0.image(image=[result['packets'].transpose()],
                x=0, y=-90, dw=24, dh=180, palette='Spectral11')
     
     # Distribution of packets used in the final model
@@ -707,7 +726,7 @@ def make_fitted_plot(self, result, filestart='fitted', show=True, ut=None):
     fig1.xaxis.ticker = FixedTicker(ticks=[0, 6, 12, 18, 24])
     fig1.yaxis.ticker = FixedTicker(ticks=[-90, 45, 0, 45, 90])
     
-    fig1.image(image=[result['source']],
+    fig1.image(image=[result['source'].transpose()],
                x=0, y=-90, dw=24, dh=180, palette='Spectral11')
     
     fig2 = bkp.figure(plot_width=WIDTH, plot_height=HEIGHT,
@@ -837,6 +856,8 @@ def make_fitted_plot(self, result, filestart='fitted', show=True, ut=None):
         bkp.show(grid)
     else:
         pass
+    
+    return grid
 
 
 def plot_fitted(self, filestart=None, show=True, make_frames=False):
