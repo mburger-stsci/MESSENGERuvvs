@@ -328,7 +328,7 @@ class MESSENGERdata:
     def model(self, start_from, npackets, quantity='radiance',
               fit_method='chisq', dphi=3*u.deg, overwrite=False,
               masking=None, filenames=None, label=None,
-              fit_to_data=False):
+              fit_to_data=False, packs_per_it=None):
         """Run the nexoclom model with specified inputs and fit to the data.
         
         ** Parameters**
@@ -398,7 +398,7 @@ class MESSENGERdata:
         # Run the model
         self.set_frame('Model')
         if runmodel:
-            inputs.run(npackets, overwrite=overwrite)
+            inputs.run(npackets, overwrite=overwrite, packs_per_it=packs_per_it)
             model_result = LOSResult(inputs, self, quantity, dphi=dphi,
                                      filenames=filenames, overwrite=overwrite,
                                      masking=masking, fit_to_data=fit_to_data)

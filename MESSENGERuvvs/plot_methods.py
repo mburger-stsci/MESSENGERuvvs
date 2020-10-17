@@ -923,3 +923,4 @@ def plot_fitted(self, filestart=None, show=True, make_frames=False, smooth=False
         # Animate the frames
         os.system(f'convert -delay 10 -quality 100 {filestart}*.png {filestart}.mpeg')
         os.system(f'rm {filestart}_*.png')
+        os.system(f'rm {filestart}_*.html')
