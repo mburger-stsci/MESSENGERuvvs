@@ -10,6 +10,18 @@ from .plot_methods import plot_bokeh, plot_plotly, plot_fitted
 from mathMB import fit_model
 
 
+def format_query(comparison):
+    '''Try to impose some regularity on the query.'''
+    query = comparison.lower()
+    
+    # Remove some extra spaces
+    chars = ['=', '>', '<', '!=', '>=', '<=']
+    for char in chars:
+        query = query.replace(f' {char} ', char)
+        
+    return query
+
+
 class InputError(Exception):
     """Raised when a required parameter is not included."""
     def __init__(self, expression, message):
@@ -211,7 +223,7 @@ class MESSENGERdata:
             if len(data) > 0:
                 self.species = species
                 self.frame = data.frame[0]
-                self.query = comparisons
+                self.query = format_query(comparisons)
                 self.taa = np.median(data.taa)
                 
                 data.drop(['species', 'frame'], inplace=True, axis=1)
