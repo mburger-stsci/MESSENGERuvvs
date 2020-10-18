@@ -96,7 +96,7 @@ def initialize_MESSENGERdata(datapath):
         mestables = ['capointing', 'cauvvsdata', 'mgpointing',
                      'mguvvsdata', 'napointing', 'nauvvsdata',
                      'caspectra', 'naspectra', 'mgspectra',
-                     'uvvsmodels']
+                     'uvvsmodels_oribt', 'uvvsmodels_query']
         
         # Delete any tables that may exist
         for mestab in mestables:
