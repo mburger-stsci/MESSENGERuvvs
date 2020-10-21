@@ -51,7 +51,11 @@ def plot_bokeh(self, filename=None, show=True):
     self.data['upper'] = self.data.radiance+self.data.sigma
     self.data['lattandeg'] = self.data.lattan*180/np.pi
     
-    m = self.data[self.data.alttan != self.data.alttan.max()].alttan.max()
+    mask = self.data.alttan != self.data.alttan.max()
+    if np.any(mask):
+        m = self.data[self.data.alttan != self.data.alttan.max()].alttan.max()
+    else:
+        m = 1e10
     col = np.interp(self.data.alttan, np.linspace(0, m, 256),
                     np.arange(256)).astype(int)
     self.data['color'] = [Turbo256[c] for c in col]
