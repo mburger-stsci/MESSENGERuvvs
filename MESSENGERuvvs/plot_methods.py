@@ -108,8 +108,8 @@ def plot_bokeh(self, filename=None, show=True):
                 c = next(col)
             
             label = f"{info['label']}"
-            fig0.line(x='utc', y=modkey, source=source,
-                      legend_label=label, color=c)
+            # fig0.line(x='utc', y=modkey, source=source,
+            #           legend_label=label, color=c)
             
             maskkey = modkey.replace('model', 'mask')
             mask = (self.data[maskkey]).to_list()
