@@ -114,14 +114,14 @@ def plot_bokeh(self, filename=None, show=True):
             maskkey = modkey.replace('model', 'mask')
             mask = (self.data[maskkey]).to_list()
             view = CDSView(source=source, filters=[BooleanFilter(mask)])
-            modplots.append(fig0.circle(x='utc', y=modkey, size=7, color=c,
+            modplots.append(fig0.circle(x='utc', y=modkey, size=9, color=c,
                                         source=source, legend_label=label,
                                         view=view))
             maskkey = modkey.replace('model', 'mask')
             mask = np.logical_not(self.data[maskkey]).to_list()
             view = CDSView(source=source, filters=[BooleanFilter(mask)])
-            maskedplots.append(fig0.circle(x='utc', y=modkey, size=7,
-                                           source=source, line_color=c,
+            maskedplots.append(fig0.circle(x='utc', y=modkey, size=9,
+                                           source=source,
                                            fill_color='yellow', view=view,
                                            legend_label=label + ' (Data Point Not Used)'))
             renderers.extend(modplots)
