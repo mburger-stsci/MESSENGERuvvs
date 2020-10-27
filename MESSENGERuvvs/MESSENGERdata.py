@@ -417,7 +417,7 @@ class MESSENGERdata:
         else:
             model_result = LOSResult(output, self, quantity, dphi=dphi,
                                      filenames=filenames, overwrite=overwrite,
-                                     fit_method=fit_method, masking=masking,
+                                     masking=masking,
                                      fit_to_data=fit_to_data)
 
         # Simulate the data
