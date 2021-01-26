@@ -4,8 +4,7 @@ import pandas as pd
 import pickle
 from solarsystemMB import SSObject
 from nexoclom import Output
-from astropy.convolution import Gaussian2DKernel
-from astropy.convolution import convolve
+from astropy.convolution import Gaussian2DKernel, convolve
 
 import bokeh.plotting as bkp
 from bokeh.models import (HoverTool, Whisker, CDSView, BooleanFilter,
@@ -121,7 +120,7 @@ def plot_bokeh(self, filename=None, show=True):
             mask = np.logical_not(self.data[maskkey]).to_list()
             view = CDSView(source=source, filters=[BooleanFilter(mask)])
             maskedplots.append(fig0.circle(x='utc', y=modkey, size=9,
-                                           source=source,
+                                           source=source, line_color=c,
                                            fill_color='yellow', view=view,
                                            legend_label=label + ' (Data Point Not Used)'))
             renderers.extend(modplots)
@@ -173,7 +172,7 @@ def plot_bokeh(self, filename=None, show=True):
     return fig0, fig1
 
 
-def plot_plotly(self, show=True):
+def plot_plotly(self, filename=None):
     pio.templates.default = 'plotly_white'
     
     # Format the date correction
@@ -193,7 +192,8 @@ def plot_plotly(self, show=True):
                               hovermode='x',
                               clickmode='event+select',
                               )
-    
+    data_figure.update_xaxes(rangeslider_visible=True)
+
     datafig = go.Scatter(name='Data',
                          x=self.data.utc,
                          y=self.data.radiance,
@@ -237,7 +237,9 @@ def plot_plotly(self, show=True):
                           line={'color':'purple'})
     data_figure.add_trace(dataline)
     data_figure.update_yaxes(range=[0, dmax*1.2])
-    
+    if filename is not None:
+        data_figure.write_html(filename)
+
     ##########################
     # Make the tangent point plot
     amax = self.data[self.data.alttan != self.data.alttan.max()].alttan.max()

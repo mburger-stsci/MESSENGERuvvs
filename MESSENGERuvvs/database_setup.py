@@ -150,8 +150,10 @@ def messenger_database_setup(force=False):
             cur.execute('select table_name from information_schema.tables')
             tables = [r[0] for r in cur.fetchall()]
 
-            mestables = ['capointing', 'cauvvsdata', 'mesmercyear', 'mgpointing',
-                         'mguvvsdata', 'napointing', 'nauvvsdata']
+            mestables = ['capointing', 'cauvvsdata', 'caspectra',
+                         'mgpointing', 'mguvvsdata', 'mgspectra',
+                         'napointing', 'nauvvsdata', 'naspectra',
+                         'mesmercyear']
             there = [m in tables for m in mestables]
 
             if (False in there) or force:

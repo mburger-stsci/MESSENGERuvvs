@@ -1,13 +1,17 @@
 """MESSENGER UVVS data class"""
+import mathMB
 import numpy as np
 import pandas as pd
 import copy
 from astropy import units as u
+from astropy.convolution import Gaussian2DKernel, convolve
+import pickle
 
 from nexoclom import Input, Output, LOSResult
+from nexoclom.input_classes import SpatialDist, SpeedDist
+import mathMB
 from .database_setup import database_connect
-from .plot_methods import plot_bokeh, plot_plotly, plot_fitted
-from mathMB import fit_model
+from .plot_methods import plot_bokeh, plot_plotly, plot_fitted, make_final_source
 
 
 def format_query(comparison):
@@ -338,9 +342,10 @@ class MESSENGERdata:
             assert 0, 'You somehow picked a bad combination.'
 
     def model(self, start_from, npackets, quantity='radiance',
-              fit_method='chisq', dphi=3*u.deg, overwrite=False,
+              fit_method='chisq', dphi=1*u.deg, overwrite=False,
               masking=None, filenames=None, label=None,
-              fit_to_data=False, packs_per_it=None):
+              fit_to_data=False, packs_per_it=None, start_from_fit=False,
+              start_from_fit_options={}):
         """Run the nexoclom model with specified inputs and fit to the data.
         
         ** Parameters**
@@ -358,7 +363,7 @@ class MESSENGERdata:
             data uncertainty.
             
         dphi
-            Angular size of the view cone. Default = 3 deg. Must be
+            Angular size of the view cone. Default = 1 deg. Must be
             given as an astropy quantity.
             
         overwrite
@@ -376,10 +381,86 @@ class MESSENGERdata:
             
             * siglimitX: Excludes any data where the model is not within X σ
               of the data in an initial fit to the data.
+        
+        start_from_fit
+            Uses a previous fit to the data as the starting point for the model
+            run. Creates a source map based on the fit. Default = False
+            * If start_from_fit = True, the inputs must be the label of the
+              model run that was fit to the data. Must have:
+              data.model_info[inputs]['fitted'] = True
+        
+        start_from_fit_options
+            A dictionary with the fields:
+            * smooth: True if the derived surface map should be smoothed
+              before running. Default = False
+            * nlonbins: Number of longitude bins in grid. Default = 72
+            * nlatbins: Number of latitude bins in grid. Default = 36
+            * nvelbins: Number of velocity bins: Default = 100
+            * mapfile: File to which the derived source should be saved.
+              Should end in '.pkl'. Default='mapfile_temp.pkl'
+            * The speed distribution needs to be defined. It can be defined
+              using the standard SpeedDistribution fields or with
+              type = 'from fit' which approximates the derived speed
+              distribution. Default is 'from fit'
         """
 
         runmodel = True
-        if isinstance(start_from, str):
+        if isinstance(start_from, str) and start_from_fit:
+            fit_to_data = False  # Ensure don't try to fit again.
+            info = self.model_info.get(start_from, {'fitted': False})
+            if not info['fitted']:
+                raise InputError('MESSENGERdata.model',
+                                 'Valid fitted model label not provided.')
+
+            # source map parameters
+            smooth = start_from_fit_options.get('smooth', False)
+            nlonbins = start_from_fit_options.get('nlonbins', 72)
+            nlatbins = start_from_fit_options.get('nlatbins', 36)
+            nvelbins = start_from_fit_options.get('nvelbins', 100)
+            mapfile = start_from_fit_options.get('mapfile', 'mapfile_temp.pkl')
+            type = start_from_fit_options.get('type', 'from fit')
+
+            # Retrieve the source map
+            final_source = make_final_source(self, nlonbins=nlonbins,
+                                             nlatbins=nlatbins, nvelbins=nvelbins)
+            source = final_source['source']
+            
+            if smooth:
+                source = final_source['source']
+                kernel = Gaussian2DKernel(x_stddev=1)
+                source = convolve(source, kernel)
+            else:
+                pass
+            
+            # Save the surface map for a model run
+            longitude = (final_source['local_time'] * np.pi / 12 + np.pi) % (2 * np.pi)
+            ind = np.argsort(longitude)
+            longitude = longitude[ind]
+            source = source[ind, :]
+            
+            surface_map = {'longitude':longitude * u.rad,
+                           'latitude':np.deg2rad(final_source['latitude']) * u.rad,
+                           'abundance':source,
+                           'coordinate_system':'solar-fixed',
+                           'velocity': final_source['velocity']*u.km/u.s,
+                           'vdist': mathMB.smooth(final_source['v_source'], 7)}
+
+            with open(mapfile, 'wb') as mfile:
+                pickle.dump(surface_map, mfile)
+                
+            # Create the inputs
+            inputs = copy.deepcopy(info['inputs'])
+            if type == 'from fit':
+                inputs.speeddist = SpeedDist({'type':'user defined',
+                                              'vdistfile':mapfile})
+            else:
+                inputs.speeddist = SpeedDist(start_from_fit_options)
+
+            inputs.spatialdist = SpatialDist({'type': 'surface map',
+                                              'mapfile': mapfile})
+
+            output = None
+        elif isinstance(start_from, str):
             inputs = Input(start_from)
             output = None
         elif isinstance(start_from, Input):
@@ -429,12 +510,12 @@ class MESSENGERdata:
         self.data[modkey] = model_result.radiance/1e3 # Convert to kR
         self.data[npackkey] = model_result.ninview
 
-        strength, goodness_of_fit, mask = fit_model(self.data.radiance.values,
-                                                    self.data[modkey].values,
-                                                    self.data.sigma.values,
-                                                    fit_method=fit_method,
-                                                    masking=masking,
-                                                    altitude=self.data.alttan)
+        strength, goodness_of_fit, mask = mathMB.fit_model(self.data.radiance.values,
+                                                           self.data[modkey].values,
+                                                           self.data.sigma.values,
+                                                           fit_method=fit_method,
+                                                           masking=masking,
+                                                           altitude=self.data.alttan)
         strength *= u.def_unit('10**23 atoms/s', 1e23/u.s)
         
         self.data[modkey] = self.data[modkey]*strength.value
@@ -455,10 +536,10 @@ class MESSENGERdata:
                       'savefile': model_result.savefiles}
         self.model_info[modkey] = model_info
         print(f'Model strength for {label} = {strength}')
-
+        
     def plot(self, filename=None, plot_method='plotly', show=False):
         if plot_method == 'plotly':
-            app = plot_plotly(self)
+            app = plot_plotly(self, filename)
             if show:
                 app.run_server(debug=False)
             else:
