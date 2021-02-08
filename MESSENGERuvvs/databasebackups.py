@@ -36,14 +36,13 @@ def databasebackups():
 
     mestables = ['capointing', 'cauvvsdata', 'caspectra',
                  'mgpointing', 'mguvvsdata', 'mgspectra',
-                 'napointing', 'nauvvsdata', 'caspectra',
+                 'napointing', 'nauvvsdata', 'naspectra',
                  'mesmercyear']
 
     for table in mestables:
         print(f'Backing up {table}')
         savef = os.path.join(datapath, f'UVVS_{table}.sql')
         os.system(f"pg_dump -p {port} -t {table} {database} > {savef}")
-
 
 if __name__ == '__main__':
     databasebackups()

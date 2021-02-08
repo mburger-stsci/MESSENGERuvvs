@@ -4,26 +4,11 @@ import numpy as np
 import pandas as pd
 import copy
 from astropy import units as u
-from astropy.convolution import Gaussian2DKernel, convolve
-import pickle
 
-from nexoclom import Input, Output, LOSResult
-from nexoclom.input_classes import SpatialDist, SpeedDist
+from nexoclom import Input, LOSResult
 import mathMB
 from .database_setup import database_connect
 from .plot_methods import plot_bokeh, plot_plotly, plot_fitted, make_final_source
-
-
-def format_query(comparison):
-    '''Try to impose some regularity on the query.'''
-    query = comparison.lower()
-    
-    # Remove some extra spaces
-    chars = ['=', '>', '<', '!=', '>=', '<=']
-    for char in chars:
-        query = query.replace(f' {char} ', char)
-        
-    return query
 
 
 class InputError(Exception):
@@ -170,9 +155,9 @@ class MESSENGERdata:
     ::
     
         >>> inputs = Input('Ca.spot.Maxwellian.input')
-        >>> CaData.model(inputs, 1e5, label='Model 1')
+        >>> CaData.simulate_data_from_inputs(inputs, 1e5, label='Model 1')
         >>> inputs.speeddist.temperature /= 2.  # Run model with different temperature
-        >>> CaData.model(inputs, 1e5, label='Model 2')
+        >>> CaData.simulate_data_from_inputs(inputs, 1e5, label='Model 2')
         
     4. Plotting data
     
@@ -189,21 +174,21 @@ class MESSENGERdata:
 
     
     """
-    def __init__(self, species=None, comparisons=None, load_spectra=False):
+    def __init__(self, species, comparisons=None, load_spectra=False):
         allspecies = ['Na', 'Ca', 'Mg']
-        self.species = None
+        if species in allspecies:
+            self.species = species
+        else:
+            raise InputError('MESSENGERdata.__init__', f'{species} not valid.')
+        
         self.frame = None
         self.query = None
         self.data = None
         self.taa = None
-        self.app = None
+        self.app = None  # Plotly app
         self.model_info = {}
-        if species is None:
-            pass
-        elif species not in allspecies:
-            # Return list of valid species
-            print(f"Valid species are {', '.join(allspecies)}")
-        elif comparisons is None:
+        
+        if comparisons is None:
             # Return list of queryable fields
             with database_connect() as con:
                 columns = pd.read_sql(
@@ -215,20 +200,21 @@ class MESSENGERdata:
         else:
             # Run the query and try to make the object
             query = f'''SELECT * from {species}uvvsdata, {species}pointing
-                        WHERE unum=pnum and {comparisons}
+                        WHERE unum=pnum and ({comparisons})
                         ORDER BY unum'''
             try:
                 with database_connect() as con:
                     data = pd.read_sql(query, con)
             except Exception:
+                print('Requested data:')
+                print(query)
                 raise InputError('MESSENGERdata.__init__',
                                  'Problem with comparisons given.')
 
             if len(data) > 0:
-                self.species = species
                 self.frame = data.frame[0]
-                self.query = format_query(comparisons)
-                self.taa = np.median(data.taa)
+                self.query = self._format_query(comparisons)
+                self.taa = np.median(data.taa)*u.rad
                 
                 data.drop(['species', 'frame'], inplace=True, axis=1)
                 data.loc[data.alttan < 0, 'alttan'] = 1e10
@@ -258,11 +244,7 @@ class MESSENGERdata:
                 print('No data found')
                 
     def __str__(self):
-        result = (f'Species: {self.species}\n'
-                  f'Query: {self.query}\n'
-                  f'Frame: {self.frame}\n'
-                  f'Object contains {len(self)} spectra.')
-        return result
+        return self.__repr__()
 
     def __repr__(self):
         result = ('MESSENGER UVVS Data Object\n'
@@ -285,10 +267,8 @@ class MESSENGERdata:
         else:
             raise TypeError
 
-        new = MESSENGERdata()
-        new.species = self.species
-        new.frame = self.frame
-        new.query = self.query
+        new = copy.deepcopy(self)
+        new.query = self.query + ' [Subset]'
         new.taa = self.taa
         new.data = self.data.iloc[q].copy()
         new.model_info = self.model_info
@@ -305,25 +285,38 @@ class MESSENGERdata:
         keys.extend([f'data.{col}' for col in self.data.columns])
         return keys
 
+    @staticmethod
+    def _format_query(comparison):
+        """Try to impose some regularity on the query."""
+        query = comparison.lower()
+    
+        # Remove some extra spaces
+        chars = ['=', '>', '<', '!=', '>=', '<=']
+        for char in chars:
+            query = query.replace(f'{char} ', char)
+            query = query.replace(f' {char}', char)
+
+        return query
+
     def set_frame(self, frame=None):
         """Convert between MSO and Model frames.
 
         More frames could be added if necessary.
         If Frame is not specified, flips between MSO and Model."""
-        if (frame is None) and (self.frame.upper() == 'MSO'):
+        if (frame is None) and (self.frame.casefold() == 'MSO'.casefold()):
             frame = 'Model'
-        elif (frame is None) and (self.frame.upper() == 'MODEL'):
+        elif (frame is None) and (self.frame.casefold() == 'MODEL'.casefold()):
             frame = 'MSO'
         else:
             pass
 
-        allframes = ['MODEL', 'MSO']
-        if frame.upper() not in allframes:
+        allframes = ['MODEL'.casefold(), 'MSO'.casefold()]
+        if frame.casefold() not in allframes:
             print('{} is not a valid frame.'.format(frame))
-            return None
         elif frame == self.frame:
             pass
-        elif (self.frame.upper() == 'MSO') and (frame.upper() == 'MODEL'):
+        elif ((self.frame.casefold() == 'MSO'.casefold()) and
+              (frame.casefold() == 'MODEL'.casefold())):
             # Convert from MSO to Model
             self.data.x, self.data.y = self.data.y.copy(), -self.data.x.copy()
             self.data.xbore, self.data.ybore = (self.data.ybore.copy(),
@@ -331,7 +324,8 @@ class MESSENGERdata:
             self.data.xtan, self.data.ytan = (self.data.ytan.copy(),
                                               -self.data.xtan.copy())
             self.frame = 'Model'
-        elif (self.frame.upper() == 'MODEL') and (frame.upper() == 'MODEL'):
+        elif ((self.frame.casefold() == 'MODEL'.casefold()) and
+              (frame.casefold() == 'MODEL'.casefold())):
             self.data.x, self.data.y = -self.data.y.copy(), self.data.x.copy()
             self.data.xbore, self.data.ybore = (-self.data.ybore.copy(),
                                                 self.data.xbore.copy())
@@ -340,12 +334,39 @@ class MESSENGERdata:
             self.frame = 'MSO'
         else:
             assert 0, 'You somehow picked a bad combination.'
+            
+    def determine_source_from_data(self,
+                                   npackets,
+                                   fit_method='chisq',
+                                   dphi=1 * u.deg,
+                                   overwrite=False,
+                                   masking=None,
+                                   label=None,
+                                   packs_per_it=None):
+        # Create the LOSResult object
+        model_result = LOSResult(self, 'radiance', dphi=dphi)
+        
+        # Put data into model units
+        self.set_frame('Model')
 
-    def model(self, start_from, npackets, quantity='radiance',
-              fit_method='chisq', dphi=1*u.deg, overwrite=False,
-              masking=None, filenames=None, label=None,
-              fit_to_data=False, packs_per_it=None, start_from_fit=False,
-              start_from_fit_options={}):
+        # simulate the data
+        model_result.determine_source_from_data(npackets, overwrite=overwrite,
+                                                packs_per_it=packs_per_it,
+                                                masking=masking)
+
+    def simulate_determined_source(self, inputs, npackets):
+        pass
+    
+    def simulate_data_from_inputs(self,
+                                  inputs,
+                                  npackets,
+                                  quantity='radiance',
+                                  fit_method='chisq',
+                                  dphi=1*u.deg,
+                                  overwrite=False,
+                                  masking=None,
+                                  label=None,
+                                  packs_per_it=None):
         """Run the nexoclom model with specified inputs and fit to the data.
         
         ** Parameters**
@@ -403,106 +424,17 @@ class MESSENGERdata:
               type = 'from fit' which approximates the derived speed
               distribution. Default is 'from fit'
         """
-
-        runmodel = True
-        if isinstance(start_from, str) and start_from_fit:
-            fit_to_data = False  # Ensure don't try to fit again.
-            info = self.model_info.get(start_from, {'fitted': False})
-            if not info['fitted']:
-                raise InputError('MESSENGERdata.model',
-                                 'Valid fitted model label not provided.')
-
-            # source map parameters
-            smooth = start_from_fit_options.get('smooth', False)
-            nlonbins = start_from_fit_options.get('nlonbins', 72)
-            nlatbins = start_from_fit_options.get('nlatbins', 36)
-            nvelbins = start_from_fit_options.get('nvelbins', 100)
-            mapfile = start_from_fit_options.get('mapfile', 'mapfile_temp.pkl')
-            type = start_from_fit_options.get('type', 'from fit')
-
-            # Retrieve the source map
-            final_source = make_final_source(self, nlonbins=nlonbins,
-                                             nlatbins=nlatbins, nvelbins=nvelbins)
-            source = final_source['source']
-            
-            if smooth:
-                source = final_source['source']
-                kernel = Gaussian2DKernel(x_stddev=1)
-                source = convolve(source, kernel)
-            else:
-                pass
-            
-            # Save the surface map for a model run
-            longitude = (final_source['local_time'] * np.pi / 12 + np.pi) % (2 * np.pi)
-            ind = np.argsort(longitude)
-            longitude = longitude[ind]
-            source = source[ind, :]
-            
-            surface_map = {'longitude':longitude * u.rad,
-                           'latitude':np.deg2rad(final_source['latitude']) * u.rad,
-                           'abundance':source,
-                           'coordinate_system':'solar-fixed',
-                           'velocity': final_source['velocity']*u.km/u.s,
-                           'vdist': mathMB.smooth(final_source['v_source'], 7)}
-
-            with open(mapfile, 'wb') as mfile:
-                pickle.dump(surface_map, mfile)
-                
-            # Create the inputs
-            inputs = copy.deepcopy(info['inputs'])
-            if type == 'from fit':
-                inputs.speeddist = SpeedDist({'type':'user defined',
-                                              'vdistfile':mapfile})
-            else:
-                inputs.speeddist = SpeedDist(start_from_fit_options)
-
-            inputs.spatialdist = SpatialDist({'type': 'surface map',
-                                              'mapfile': mapfile})
-
-            output = None
-        elif isinstance(start_from, str):
-            inputs = Input(start_from)
-            output = None
-        elif isinstance(start_from, Input):
-            inputs = copy.deepcopy(start_from)
-            output = None
-        elif isinstance(start_from, Output):
-            inputs = copy.deepcopy(start_from.inputs)
-            output = start_from
-            runmodel = False
-        else:
-            raise InputError('MESSENGERdata.model', 'Problem with the inputs.')
-
-        # TAA needs to match the data
-        if len(self.data.orbit.unique()) == 1:
-            inputs.geometry.taa = np.median(self.data.taa)*u.rad
-        elif self.data.taa.max()-self.data.taa.min() < 3*np.pi/180.:
-            inputs.geometry.taa = self.data.taa.median()*u.rad
-        else:
-            assert 0, 'Too wide a range of taa'
-            
-        # If using a planet-fixed source map, need to set subsolarlon
-        if ((inputs.spatialdist.type == 'surface map') and
-            (inputs.spatialdist.coordinate_system == 'planet-fixed')):
-            inputs.spatialdist.subsolarlon = self.data.subslong.median()*u.rad
-        else:
-            pass
-
-        # Run the model
+        # Put data into model units
         self.set_frame('Model')
-        if runmodel:
-            inputs.run(npackets, overwrite=overwrite, packs_per_it=packs_per_it)
-            model_result = LOSResult(inputs, self, quantity, dphi=dphi,
-                                     filenames=filenames, overwrite=overwrite,
-                                     masking=masking, fit_to_data=fit_to_data)
-        else:
-            model_result = LOSResult(output, self, quantity, dphi=dphi,
-                                     filenames=filenames, overwrite=overwrite,
-                                     masking=masking,
-                                     fit_to_data=fit_to_data)
-
-        # Simulate the data
-        # modkey is the number for this model
+        
+        # Create the LOSResult object
+        model_result = LOSResult(self, quantity, dphi=dphi)
+        
+        # simulate the data
+        model_result.simulate_data_from_inputs(inputs, npackets, overwrite,
+                                               packs_per_it)
+        
+        # Attach the model_result to the data
         modnum = len(self.model_info)
         modkey = f'model{modnum:00d}'
         npackkey = f'npackets{modnum:00d}'
@@ -531,9 +463,9 @@ class MESSENGERdata:
                       'goodness-of-fit': goodness_of_fit,
                       'strength': strength,
                       'label': label,
-                      'filenames': model_result.filenames,
+                      'outputfiles': model_result.outputfiles,
                       'fitted': model_result.fitted,
-                      'savefile': model_result.savefiles}
+                      'modelfiles': model_result.modelfiles}
         self.model_info[modkey] = model_info
         print(f'Model strength for {label} = {strength}')
         
