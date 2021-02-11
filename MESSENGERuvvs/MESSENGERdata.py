@@ -335,38 +335,20 @@ class MESSENGERdata:
         else:
             assert 0, 'You somehow picked a bad combination.'
             
-    def determine_source_from_data(self,
-                                   npackets,
-                                   fit_method='chisq',
-                                   dphi=1 * u.deg,
-                                   overwrite=False,
-                                   masking=None,
-                                   label=None,
-                                   packs_per_it=None):
-        # Create the LOSResult object
-        model_result = LOSResult(self, 'radiance', dphi=dphi)
-        
-        # Put data into model units
-        self.set_frame('Model')
-
-        # simulate the data
-        model_result.determine_source_from_data(npackets, overwrite=overwrite,
-                                                packs_per_it=packs_per_it,
-                                                masking=masking)
 
     def simulate_determined_source(self, inputs, npackets):
         pass
     
-    def simulate_data_from_inputs(self,
-                                  inputs,
-                                  npackets,
-                                  quantity='radiance',
-                                  fit_method='chisq',
-                                  dphi=1*u.deg,
-                                  overwrite=False,
-                                  masking=None,
-                                  label=None,
-                                  packs_per_it=None):
+    def model(self,
+              inputs,
+              npackets,
+              quantity='radiance',
+              fit_method='chisq',
+              dphi=1*u.deg,
+              overwrite=False,
+              masking=None,
+              label=None,
+              packs_per_it=None):
         """Run the nexoclom model with specified inputs and fit to the data.
         
         ** Parameters**
@@ -431,44 +413,51 @@ class MESSENGERdata:
         model_result = LOSResult(self, quantity, dphi=dphi)
         
         # simulate the data
-        model_result.simulate_data_from_inputs(inputs, npackets, overwrite,
-                                               packs_per_it)
+        if inputs.options.fitted:
+            model_result.determine_source_from_data(inputs, npackets,
+                                                    overwrite=overwrite,
+                                                    packs_per_it=packs_per_it,
+                                                    masking=masking)
+        else:
+            model_result.simulate_data_from_inputs(inputs, npackets, overwrite,
+                                                   packs_per_it)
         
         # Attach the model_result to the data
         modnum = len(self.model_info)
         modkey = f'model{modnum:00d}'
         npackkey = f'npackets{modnum:00d}'
         maskkey = f'mask{modnum:00d}'
-        self.data[modkey] = model_result.radiance/1e3 # Convert to kR
-        self.data[npackkey] = model_result.ninview
-
+        
+        self.data[modkey] = model_result.radiance / 1e3 # Convert to kR
+        self.data[npackkey] = model_result.npackets
         strength, goodness_of_fit, mask = mathMB.fit_model(self.data.radiance.values,
                                                            self.data[modkey].values,
                                                            self.data.sigma.values,
                                                            fit_method=fit_method,
                                                            masking=masking,
                                                            altitude=self.data.alttan)
-        strength *= u.def_unit('10**23 atoms/s', 1e23/u.s)
-        
-        self.data[modkey] = self.data[modkey]*strength.value
+        strength *= u.def_unit('10**23 atoms/s', 1e23 / u.s)
+        self.data[modkey] = self.data[modkey] * strength.value
         self.data[maskkey] = mask
-
+    
         if label is None:
             label = modkey.capitalize()
         else:
             pass
-
-        model_info = {'inputs': inputs,
-                      'fit_method': fit_method,
-                      'goodness-of-fit': goodness_of_fit,
-                      'strength': strength,
-                      'label': label,
-                      'outputfiles': model_result.outputfiles,
-                      'fitted': model_result.fitted,
-                      'modelfiles': model_result.modelfiles}
+    
+        model_info = {'inputs':model_result.inputs,
+                      'fit_method':fit_method,
+                      'goodness-of-fit':goodness_of_fit,
+                      'strength':strength,
+                      'label':label,
+                      'outputfiles':model_result.outputfiles,
+                      'fitted':model_result.fitted,
+                      'modelfiles':model_result.modelfiles,
+                      'sourcemap': model_result.sourcemap}
+        
         self.model_info[modkey] = model_info
         print(f'Model strength for {label} = {strength}')
-        
+
     def plot(self, filename=None, plot_method='plotly', show=False):
         if plot_method == 'plotly':
             app = plot_plotly(self, filename)
