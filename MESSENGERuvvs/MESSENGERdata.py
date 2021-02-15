@@ -8,7 +8,7 @@ from astropy import units as u
 from nexoclom import Input, LOSResult
 import mathMB
 from .database_setup import database_connect
-from .plot_methods import plot_bokeh, plot_plotly, plot_fitted, make_final_source
+from .plot_methods import plot_bokeh, plot_plotly, plot_fitted
 
 
 class InputError(Exception):

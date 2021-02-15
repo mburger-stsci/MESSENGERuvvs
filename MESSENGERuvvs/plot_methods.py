@@ -459,82 +459,82 @@ def plot_plotly(self, filename=None):
     return app
 
 
-def make_final_source(self, nlonbins=72, nlatbins=36, nvelbins=100):
-    modkey = None
-    for key in self.model_info:
-        if self.model_info[key]['fitted']:
-            modkey = key
-        else:
-            pass
-    
-    '''Make source frames for each spectrum'''
-    Mercury = SSObject('Mercury')
-    model_info = self.model_info[modkey]
-    loctime, latitude = np.zeros((0,)), np.zeros((0,))
-    velocity, weight = np.zeros((0,)), np.zeros((0,))
-    
-    # Load the data from all available outputfiles
-    for outputfile, modelfile in model_info['savefile'].items():
-        output = Output.restore(outputfile)
-        with open(modelfile, 'rb') as f:
-            model_result = pickle.load(f)
-        
-        # Final source information
-        new_weight = model_result['weighting'].weight.apply(
-                lambda x:x.mean() if x.shape[0] > 0 else 0.)
-        include = model_result['weighting'].weight.apply(lambda x:len(x) > 0)
-        if np.any(new_weight > 0):
-            multiplier = new_weight.loc[output.X['Index']].values
-            output.X.loc[:, 'frac'] = output.X.loc[:, 'frac']*multiplier
-            output.X0.loc[:, 'frac'] = output.X0.loc[:, 'frac']*new_weight
-            output.totalsource = np.sum(output.X0.frac)
-            
-            loctime = np.append(loctime, output.X0.loc[include].local_time)
-            latitude = np.append(latitude, output.X0.loc[include].latitude)
-            velocity = np.append(velocity, np.sqrt(output.X0.loc[include].vx**2 +
-                                                   output.X0.loc[include].vy**2 +
-                                                   output.X0.loc[include].vz**2))
-            weight = np.append(weight, output.X0.loc[include].frac)
-        else:
-            pass
-
-    # Produce the necessary histograms
-    if len(loctime) > 0:
-        velocity *= Mercury.radius.value
-        latitude *= 180./np.pi
-        
-        # source used
-        source, xx, yy = np.histogram2d(loctime, latitude, weights=weight,
-                                        range=[[0, 24], [-90, 90]],
-                                        bins=(nlonbins, nlatbins))
-        v_source, v = np.histogram(velocity, bins=nvelbins, range=[0, 10],
-                                   weights=weight)
-        v_source /= np.max(v_source)
-        
-        # packets available
-        packets, _, _ = np.histogram2d(loctime, latitude,
-                                       range=[[0, 24], [-90, 90]],
-                                       bins=(nlonbins, nlatbins))
-        v_packets, _ = np.histogram(velocity, bins=nvelbins, range=[0, 10])
-        v_packets = v_packets/np.max(v_packets)
-
-        # Make local_time, latitude, velocity the center of the bins
-        local_time = xx[:-1] + (xx[1]-xx[0])/2.
-        latitude = yy[:-1] + (yy[1]-yy[0])/2.
-        v = v[:-1] + (v[1]-v[0])/2.
-
-        # Correct for surface area
-        lat = np.cos(latitude*np.pi/180)
-        source = source/lat[np.newaxis,:]
-        packets = packets/lat[np.newaxis,:]
-
-        result = {'source':source, 'packets':packets,
-                  'local_time':local_time, 'latitude':latitude,
-                  'v_source':v_source, 'v_packets':v_packets, 'velocity':v}
-    else:
-        result = None
-    
-    return result
+# def make_final_source(self, nlonbins=72, nlatbins=36, nvelbins=100):
+#     modkey = None
+#     for key in self.model_info:
+#         if self.model_info[key]['fitted']:
+#             modkey = key
+#         else:
+#             pass
+#
+#     '''Make source frames for each spectrum'''
+#     Mercury = SSObject('Mercury')
+#     model_info = self.model_info[modkey]
+#     loctime, latitude = np.zeros((0,)), np.zeros((0,))
+#     velocity, weight = np.zeros((0,)), np.zeros((0,))
+#
+#     # Load the data from all available outputfiles
+#     for outputfile, modelfile in model_info['savefile'].items():
+#         output = Output.restore(outputfile)
+#         with open(modelfile, 'rb') as f:
+#             model_result = pickle.load(f)
+#
+#         # Final source information
+#         new_weight = model_result['weighting'].weight.apply(
+#                 lambda x:x.mean() if x.shape[0] > 0 else 0.)
+#         include = model_result['weighting'].weight.apply(lambda x:len(x) > 0)
+#         if np.any(new_weight > 0):
+#             multiplier = new_weight.loc[output.X['Index']].values
+#             output.X.loc[:, 'frac'] = output.X.loc[:, 'frac']*multiplier
+#             output.X0.loc[:, 'frac'] = output.X0.loc[:, 'frac']*new_weight
+#             output.totalsource = np.sum(output.X0.frac)
+#
+#             loctime = np.append(loctime, output.X0.loc[include].local_time)
+#             latitude = np.append(latitude, output.X0.loc[include].latitude)
+#             velocity = np.append(velocity, np.sqrt(output.X0.loc[include].vx**2 +
+#                                                    output.X0.loc[include].vy**2 +
+#                                                    output.X0.loc[include].vz**2))
+#             weight = np.append(weight, output.X0.loc[include].frac)
+#         else:
+#             pass
+#
+#     # Produce the necessary histograms
+#     if len(loctime) > 0:
+#         velocity *= Mercury.radius.value
+#         latitude *= 180./np.pi
+#
+#         # source used
+#         source, xx, yy = np.histogram2d(loctime, latitude, weights=weight,
+#                                         range=[[0, 24], [-90, 90]],
+#                                         bins=(nlonbins, nlatbins))
+#         v_source, v = np.histogram(velocity, bins=nvelbins, range=[0, 10],
+#                                    weights=weight)
+#         v_source /= np.max(v_source)
+#
+#         # packets available
+#         packets, _, _ = np.histogram2d(loctime, latitude,
+#                                        range=[[0, 24], [-90, 90]],
+#                                        bins=(nlonbins, nlatbins))
+#         v_packets, _ = np.histogram(velocity, bins=nvelbins, range=[0, 10])
+#         v_packets = v_packets/np.max(v_packets)
+#
+#         # Make local_time, latitude, velocity the center of the bins
+#         local_time = xx[:-1] + (xx[1]-xx[0])/2.
+#         latitude = yy[:-1] + (yy[1]-yy[0])/2.
+#         v = v[:-1] + (v[1]-v[0])/2.
+#
+#         # Correct for surface area
+#         lat = np.cos(latitude*np.pi/180)
+#         source = source/lat[np.newaxis,:]
+#         packets = packets/lat[np.newaxis,:]
+#
+#         result = {'source':source, 'packets':packets,
+#                   'local_time':local_time, 'latitude':latitude,
+#                   'v_source':v_source, 'v_packets':v_packets, 'velocity':v}
+#     else:
+#         result = None
+#
+#     return result
 
 
 def frame_generator(self, nlonbins=72, nlatbins=36, nvelbins=100):
@@ -627,15 +627,19 @@ def make_fitted_plot(self, result, filestart='fitted', show=True, ut=None,
     
     if smooth:
         kernel = Gaussian2DKernel(x_stddev=1)
-        source = convolve(result['source'], kernel)
-        packets = convolve(result['packets'], kernel)
+        source = convolve(result['abundance'], kernel)
+        packets = convolve(result['p_available'], kernel)
     else:
-        source = result['source']
-        packets = result['packets']
+        source = result['abundance']
+        packets = result['p_available']
     
     # Tools
     tools = ['save']
-    
+
+    local_time = (result['longitude'].value * 12/np.pi + 12) % 24
+    arg = np.argsort(local_time[:-1])
+    source, packets = source[arg,:], packets[arg,:]
+
     # Distribution of available packets
     fig0 = bkp.figure(plot_width=WIDTH, plot_height=HEIGHT,
                       title=f'{self.species}, {self.query}, Available Packets',
@@ -684,9 +688,9 @@ def make_fitted_plot(self, result, filestart='fitted', show=True, ut=None,
     fig2.xaxis.major_label_text_font_size = NUMFONTSIZE
     fig2.yaxis.major_label_text_font_size = NUMFONTSIZE
     
-    fig2.line(x=result['velocity'], y=result['v_packets'],
+    fig2.line(x=result['velocity'][:-1], y=result['v_available'],
               legend_label='Packets Available', color='red')
-    fig2.line(x=result['velocity'], y=result['v_source'],
+    fig2.line(x=result['velocity'][:-1], y=result['vdist'],
               legend_label='Packets Used', color='blue')
     
     # Full orbit time series
@@ -796,7 +800,7 @@ def make_fitted_plot(self, result, filestart='fitted', show=True, ut=None,
     grid = gridplot([[fig3, fig2], [fig0, fig1]])
     
     # Save png version
-    export_png(grid, filename=filestart+'.png')
+    # export_png(grid, filename=filestart+'.png')
     
     bkp.output_file(filestart+'.html')
     bkp.save(grid)  # html files not needed
@@ -816,24 +820,31 @@ def plot_fitted(self, filestart=None, show=True, make_frames=False, smooth=False
         os.makedirs(os.path.dirname(filestart))
     
     # Compute and plot final source results
-    final_result = make_final_source(self)
-    make_fitted_plot(self, final_result, filestart=filestart, show=show,
-                     smooth=smooth)
+    for key in self.model_info:
+        if self.model_info[key]['fitted']:
+            final_result = self.model_info[key]['sourcemap']
+            make_fitted_plot(self, final_result, filestart=filestart, show=show,
+                             smooth=smooth)
     
-    if make_frames:
-        # Compute results for each spectrum
-        frames_result = frame_generator(self)
-        allframes = frames_result['result']
-        for specnum, frame in allframes.iterrows():
-            print(specnum)
-            result = frame.to_dict()
-            result['velocity'] = final_result['velocity']
-            
-            framefilestart = f'{filestart}_{specnum}'
-            make_fitted_plot(self, result, framefilestart, False,
-                             ut=self.data.loc[specnum, 'utc'], smooth=smooth)
+            if make_frames:
+                # Compute results for each spectrum
+                frames_result = frame_generator(self)
+                allframes = frames_result['result']
+                for specnum, frame in allframes.iterrows():
+                    print(specnum)
+                    result = frame.to_dict()
+                    result['velocity'] = final_result['velocity']
+                    
+                    framefilestart = f'{filestart}_{specnum}'
+                    make_fitted_plot(self, result, framefilestart, False,
+                                     ut=self.data.loc[specnum, 'utc'], smooth=smooth)
         
-        # Animate the frames
-        os.system(f'convert -delay 10 -quality 100 {filestart}*.png {filestart}.mpeg')
-        os.system(f'rm {filestart}_*.png')
-        os.system(f'rm {filestart}_*.html')
+                    # Animate the frames
+                    os.system(f'convert -delay 10 -quality 100 {filestart}*.png '
+                              f'{filestart}.mpeg')
+                    os.system(f'rm {filestart}_*.png')
+                    os.system(f'rm {filestart}_*.html')
+            else:
+                pass
+        else:
+            pass
