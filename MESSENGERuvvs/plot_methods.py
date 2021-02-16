@@ -627,8 +627,8 @@ def make_fitted_plot(self, result, filestart='fitted', show=True, ut=None,
     
     if smooth:
         kernel = Gaussian2DKernel(x_stddev=1)
-        source = convolve(result['abundance'], kernel)
-        packets = convolve(result['p_available'], kernel)
+        source = convolve(result['abundance'], kernel, boundary='wrap')
+        packets = convolve(result['p_available'], kernel, boundary='wrap')
     else:
         source = result['abundance']
         packets = result['p_available']
