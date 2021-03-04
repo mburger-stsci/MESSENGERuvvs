@@ -29,7 +29,7 @@ FONTSIZE, NUMFONTSIZE = '16pt', '12pt'
 
 BOKEH_THEME_FILE = os.path.join(os.path.dirname(__file__), 'data', 'bokeh.yml')
 
-def plot_bokeh(self, filename=None, show=True):
+def plot_bokeh(self, filename=None, show=True, savepng=False):
     curdoc().theme = Theme(BOKEH_THEME_FILE)
     
     if filename is not None:
@@ -800,7 +800,10 @@ def make_fitted_plot(self, result, filestart='fitted', show=True, ut=None,
     grid = gridplot([[fig3, fig2], [fig0, fig1]])
     
     # Save png version
-    # export_png(grid, filename=filestart+'.png')
+    if savepng:
+        export_png(grid, filename=filestart+'.png')
+    else:
+        pass
     
     bkp.output_file(filestart+'.html')
     bkp.save(grid)  # html files not needed
