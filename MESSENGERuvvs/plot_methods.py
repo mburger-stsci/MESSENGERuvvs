@@ -819,7 +819,8 @@ def make_fitted_plot(self, result, filestart='fitted', show=True, ut=None,
     return grid
 
 
-def plot_fitted(self, filestart=None, show=True, make_frames=False, smooth=False):
+def plot_fitted(self, filestart=None, show=True, make_frames=False,
+                smooth=False, savepng=False):
     # Check that the path exists
     if ((os.path.dirname(filestart) != '') and
         (not os.path.exists(os.path.dirname(filestart)))):
@@ -830,7 +831,7 @@ def plot_fitted(self, filestart=None, show=True, make_frames=False, smooth=False
         if self.model_info[key]['fitted']:
             final_result = self.model_info[key]['sourcemap']
             make_fitted_plot(self, final_result, filestart=filestart, show=show,
-                             smooth=smooth)
+                             smooth=smooth, savepng=savepng)
     
             if make_frames:
                 # Compute results for each spectrum
@@ -843,7 +844,8 @@ def plot_fitted(self, filestart=None, show=True, make_frames=False, smooth=False
                     
                     framefilestart = f'{filestart}_{specnum}'
                     make_fitted_plot(self, result, framefilestart, False,
-                                     ut=self.data.loc[specnum, 'utc'], smooth=smooth)
+                                     ut=self.data.loc[specnum, 'utc'],
+                                     smooth=smooth, savepng=savepng)
         
                     # Animate the frames
                     os.system(f'convert -delay 10 -quality 100 {filestart}*.png '

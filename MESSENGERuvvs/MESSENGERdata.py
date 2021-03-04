@@ -472,8 +472,9 @@ class MESSENGERdata:
             print('Not a valid plotting method')
             
     def plot_fitted_model(self, filestart='fitted', show=False,
-                          make_frames=False, smooth=False):
-        plot_fitted(self, filestart, show, make_frames, smooth=smooth)
+                          make_frames=False, smooth=False, savepng=False):
+        plot_fitted(self, filestart, show, make_frames, smooth=smooth,
+                    savepng=savepng)
 
     def export(self, filename, columns=('utc', 'radiance')):
         """Export data and models to a file.
