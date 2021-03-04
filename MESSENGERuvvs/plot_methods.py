@@ -161,7 +161,10 @@ def plot_bokeh(self, filename=None, show=True, savepng=False):
     
     if filename is not None:
         bkp.output_file(filename)
-        export_png(grid, filename=filename.replace('.html', '.png'))
+        if savepng:
+            export_png(grid, filename=filename.replace('.html', '.png'))
+        else:
+            pass
         bkp.save(grid)
     else:
         pass
@@ -622,7 +625,7 @@ def frame_generator(self, nlonbins=72, nlatbins=36, nvelbins=100):
 
 
 def make_fitted_plot(self, result, filestart='fitted', show=True, ut=None,
-                     smooth=False):
+                     smooth=False, savepng=False):
     curdoc().theme = Theme(BOKEH_THEME_FILE)
     
     if smooth:
