@@ -827,10 +827,15 @@ def plot_fitted(self, filestart=None, show=True, make_frames=False,
         os.makedirs(os.path.dirname(filestart))
     
     # Compute and plot final source results
+    nfitted = sum(self.model_info[info]['fitted'] for info in self.model_info)
     for key in self.model_info:
         if self.model_info[key]['fitted']:
             final_result = self.model_info[key]['sourcemap']
-            make_fitted_plot(self, final_result, filestart=filestart, show=show,
+            if nfitted > 1:
+                filestart_ = f'{filestart}_{key}'
+            else:
+                filestart_ = filestart
+            make_fitted_plot(self, final_result, filestart=filestart_, show=show,
                              smooth=smooth, savepng=savepng)
     
             if make_frames:
@@ -842,16 +847,16 @@ def plot_fitted(self, filestart=None, show=True, make_frames=False,
                     result = frame.to_dict()
                     result['velocity'] = final_result['velocity']
                     
-                    framefilestart = f'{filestart}_{specnum}'
+                    framefilestart = f'{filestart_}_{specnum}'
                     make_fitted_plot(self, result, framefilestart, False,
                                      ut=self.data.loc[specnum, 'utc'],
                                      smooth=smooth, savepng=savepng)
         
                     # Animate the frames
-                    os.system(f'convert -delay 10 -quality 100 {filestart}*.png '
-                              f'{filestart}.mpeg')
-                    os.system(f'rm {filestart}_*.png')
-                    os.system(f'rm {filestart}_*.html')
+                    os.system(f'convert -delay 10 -quality 100 {filestart_}*.png '
+                              f'{filestart_}.mpeg')
+                    os.system(f'rm {filestart_}_*.png')
+                    os.system(f'rm {filestart_}_*.html')
             else:
                 pass
         else:

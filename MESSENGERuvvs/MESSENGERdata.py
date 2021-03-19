@@ -1,7 +1,7 @@
 """MESSENGER UVVS data class"""
-import mathMB
 import numpy as np
 import pandas as pd
+import pickle
 import copy
 from astropy import units as u
 
@@ -336,9 +336,117 @@ class MESSENGERdata:
             assert 0, 'You somehow picked a bad combination.'
             
 
-    def simulate_determined_source(self, inputs, npackets):
-        pass
+    def compute_radiance_from_map(self, unfitnum, sourcemap_, label=None):
+        oldkey = f'model{unfitnum:02d}'
+        oldinfo = self.model_info[oldkey]
+        
+        if isinstance(sourcemap_, str) and sourcemap_.endswith('.pkl'):
+            with open(sourcemap_, 'rb') as mfile:
+                sourcemap = pickle.load(mfile)
+        elif isinstance(sourcemap_, str) and sourcemap_.endswith('.sav'):
+            from scipy.io import readsav
+            sourcemap_ = readsav(sourcemap_)
+            sourcemap = {'longitude':sourcemap_['longitude'][0]*u.rad,
+                         'latitude':sourcemap_['latitude'][0]*u.rad,
+                         'abundance':sourcemap_['map'][0].transpose(),
+                         'coordinate_system':str(sourcemap_['coordinate_system'][0])}
+        elif isinstance(sourcemap_, dict):
+            sourcemap = sourcemap_
+        else:
+            raise InputError('MESSENGERuvvs.compute_radiance_from_map: '
+                             'Improper sourcemap format')
+        
+        # Create the LOSResult object
+        model_result = LOSResult(self, 'radiance')
     
+        # Compute fit to data
+        model_result.recompute_radiance(unfitnum, sourcemap)
+    
+        # Attach the model_result to the data
+        modnum = len(self.model_info)
+        modkey = f'model{modnum:02d}'
+        npackkey = f'npackets{modnum:02d}'
+        maskkey = f'mask{modnum:02d}'
+    
+        self.data[modkey] = model_result.radiance / 1e3  # Convert to kR
+        self.data[npackkey] = model_result.npackets
+        strength, goodness_of_fit, mask = mathMB.fit_model(self.data.radiance.values,
+                                                           self.data[modkey].values,
+                                                           self.data.sigma.values,
+                                                           fit_method=oldinfo['fit_method'],
+                                                           masking=oldinfo['masking'],
+                                                           altitude=self.data.alttan)
+        strength *= u.def_unit('10**23 atoms/s', 1e23 / u.s)
+        self.data[modkey] = self.data[modkey] * strength.value
+        self.data[maskkey] = mask
+    
+        if label is None:
+            label = modkey.capitalize()
+        else:
+            pass
+    
+        model_info = {'inputs':model_result.inputs,
+                      'fit_method':oldinfo['fit_method'],
+                      'masking':oldinfo['masking'],
+                      'goodness-of-fit':goodness_of_fit,
+                      'strength':strength,
+                      'label':label,
+                      'outputfiles':model_result.outputfiles,
+                      'fitted': False,
+                      'modelfiles':model_result.modelfiles,
+                      'sourcemap':model_result.sourcemap}
+    
+        self.model_info[modkey] = model_info
+        print(f'Model strength for {label} = {strength}')
+
+    def determine_source(self, unfitnum, label=None, weight_method='scaling'):
+        oldkey = f'model{unfitnum:02d}'
+        oldinfo = self.model_info[oldkey]
+        
+        # Create the LOSResult object
+        model_result = LOSResult(self, 'radiance')
+        
+        # Compute fit to data
+        model_result.determine_source_from_data(unfitnum,
+                                                weight_method=weight_method)
+        
+        # Attach the model_result to the data
+        modnum = len(self.model_info)
+        modkey = f'model{modnum:02d}'
+        npackkey = f'npackets{modnum:02d}'
+        maskkey = f'mask{modnum:02d}'
+
+        self.data[modkey] = model_result.radiance / 1e3  # Convert to kR
+        self.data[npackkey] = model_result.npackets
+        strength, goodness_of_fit, mask = mathMB.fit_model(self.data.radiance.values,
+                                                           self.data[modkey].values,
+                                                           self.data.sigma.values,
+                                                           fit_method=oldinfo['fit_method'],
+                                                           masking=oldinfo['masking'],
+                                                           altitude=self.data.alttan)
+        strength *= u.def_unit('10**23 atoms/s', 1e23 / u.s)
+        self.data[modkey] = self.data[modkey] * strength.value
+        self.data[maskkey] = mask
+
+        if label is None:
+            label = modkey.capitalize()
+        else:
+            pass
+
+        model_info = {'inputs':model_result.inputs,
+                      'fit_method': oldinfo['fit_method'],
+                      'masking': oldinfo['masking'],
+                      'goodness-of-fit':goodness_of_fit,
+                      'strength':strength,
+                      'label':label,
+                      'outputfiles':model_result.outputfiles,
+                      'fitted': True,
+                      'modelfiles':model_result.modelfiles,
+                      'sourcemap':model_result.sourcemap}
+
+        self.model_info[modkey] = model_info
+        print(f'Model strength for {label} = {strength}')
+
     def model(self,
               inputs,
               npackets,
@@ -413,21 +521,16 @@ class MESSENGERdata:
         model_result = LOSResult(self, quantity, dphi=dphi)
         
         # simulate the data
-        if inputs.options.fitted:
-            model_result.determine_source_from_data(inputs, npackets,
-                                                    overwrite=overwrite,
-                                                    packs_per_it=packs_per_it,
-                                                    masking=masking)
-        else:
-            model_result.simulate_data_from_inputs(inputs, npackets, overwrite,
-                                                   packs_per_it)
+        inputs.options.fitted = False
+        model_result.simulate_data_from_inputs(inputs, npackets, overwrite,
+                                               packs_per_it)
         
         # Attach the model_result to the data
         modnum = len(self.model_info)
-        modkey = f'model{modnum:00d}'
-        npackkey = f'npackets{modnum:00d}'
-        maskkey = f'mask{modnum:00d}'
-        
+        modkey = f'model{modnum:02d}'
+        npackkey = f'npackets{modnum:02d}'
+        maskkey = f'mask{modnum:02d}'
+
         self.data[modkey] = model_result.radiance / 1e3 # Convert to kR
         self.data[npackkey] = model_result.npackets
         strength, goodness_of_fit, mask = mathMB.fit_model(self.data.radiance.values,
@@ -445,16 +548,17 @@ class MESSENGERdata:
         else:
             pass
     
-        model_info = {'inputs':model_result.inputs,
-                      'fit_method':fit_method,
-                      'goodness-of-fit':goodness_of_fit,
-                      'strength':strength,
-                      'label':label,
-                      'outputfiles':model_result.outputfiles,
-                      'fitted':model_result.fitted,
-                      'modelfiles':model_result.modelfiles,
+        model_info = {'inputs': model_result.inputs,
+                      'fit_method': fit_method,
+                      'masking': masking,
+                      'goodness-of-fit': goodness_of_fit,
+                      'strength': strength,
+                      'label': label,
+                      'outputfiles': model_result.outputfiles,
+                      'fitted': False,
+                      'modelfiles': model_result.modelfiles,
                       'sourcemap': model_result.sourcemap}
-        
+
         self.model_info[modkey] = model_info
         print(f'Model strength for {label} = {strength}')
 
