@@ -188,7 +188,7 @@ class MESSENGERdata:
         self.data = None
         self.taa = None
         self.app = None  # Plotly app
-        self.model_info = {}
+        self.model_result = {}
         
         if comparisons is None:
             # Return list of queryable fields
@@ -273,7 +273,7 @@ class MESSENGERdata:
         new.query = self.query + ' [Subset]'
         new.taa = self.taa
         new.data = self.data.iloc[q].copy()
-        new.model_info = self.model_info
+        new.model_result = self.model_result
         
         return new
     
@@ -391,7 +391,7 @@ class MESSENGERdata:
             run. Creates a source map based on the fit. Default = False
             * If start_from_fit = True, the inputs must be the label of the
               model run that was fit to the data. Must have:
-              data.model_info[inputs]['fitted'] = True
+              data.model_result[inputs]['fitted'] = True
 
         start_from_fit_options
             A dictionary with the fields:
@@ -410,54 +410,43 @@ class MESSENGERdata:
         # Put data into model units
         self.set_frame('Model')
         
+        # Run the model with fitted = False to get the starting point.
+        oldfit = inputs.options.fitted
+        inputs.options.fitted = False
+        inputs.geometry.taa = self.taa
+        inputs.run(npackets, packs_per_it, overwrite)
+        
+        inputs.options.fitted = oldfit
+
         # Create the LOSResult object
-        model_result = LOSResult(self, quantity, dphi=dphi)
+        params = {'quantity': 'radiance'}
+        model_result = LOSResult(self, inputs, params=params, dphi=dphi,
+                                 masking=masking, fit_method=fit_method,
+                                 label=label)
         
         # simulate the data
         if inputs.options.fitted:
-            model_result.determine_source_from_data(inputs, npackets,
-                                                    overwrite=overwrite,
-                                                    packs_per_it=packs_per_it,
-                                                    masking=masking)
+            model_result.determine_source_from_data(self)
         else:
-            model_result.simulate_data_from_inputs(inputs, npackets, overwrite,
-                                                   packs_per_it)
+            model_result.simulate_data_from_inputs(self)
         
         # Attach the model_result to the data
-        modnum = len(self.model_info)
-        modkey = f'model{modnum:00d}'
-        npackkey = f'npackets{modnum:00d}'
-        maskkey = f'mask{modnum:00d}'
+        modnum = len(self.model_result)
+        modkey = f'model{modnum:02d}'
+        npackkey = f'npackets{modnum:02d}'
+        maskkey = f'mask{modnum:02d}'
         
-        self.data[modkey] = model_result.radiance / 1e3  # Convert to kR
+        self.data[modkey] = model_result.radiance.values
         self.data[npackkey] = model_result.npackets
-        strength, goodness_of_fit, mask = mathMB.fit_model(self.data.radiance.values,
-                                                           self.data[modkey].values,
-                                                           self.data.sigma.values,
-                                                           fit_method=fit_method,
-                                                           masking=masking,
-                                                           altitude=self.data.alttan)
-        strength *= u.def_unit('10**23 atoms/s', 1e23 / u.s)
-        self.data[modkey] = self.data[modkey] * strength.value
-        self.data[maskkey] = mask
+        self.data[maskkey] = model_result.mask
         
         if label is None:
             label = modkey.capitalize()
         else:
             pass
         
-        model_info = {'inputs':model_result.inputs,
-                      'fit_method':fit_method,
-                      'goodness-of-fit':goodness_of_fit,
-                      'strength':strength,
-                      'label':label,
-                      'outputfiles':model_result.outputfiles,
-                      'fitted':model_result.fitted,
-                      'modelfiles':model_result.modelfiles,
-                      'sourcemap':model_result.sourcemap}
-        
-        self.model_info[modkey] = model_info
-        print(f'Model strength for {label} = {strength}')
+        self.model_result[modkey] = model_result
+        print(f'Model strength for {label} = {model_result.sourcerate}')
     
     def plot(self, filename=None, plot_method='plotly', show=False):
         if plot_method == 'plotly':
@@ -498,8 +487,8 @@ class MESSENGERdata:
 
         """
         columns_ = list(columns)
-        if len(self.model_info) != 0:
-            columns_.extend(self.model_info.keys())
+        if len(self.model_result) != 0:
+            columns_.extend(self.model_result.keys())
         else:
             pass
         

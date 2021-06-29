@@ -336,7 +336,8 @@ class MESSENGERdata:
             assert 0, 'You somehow picked a bad combination.'
             
 
-    def compute_radiance_from_map(self, unfitnum, sourcemap_, label=None):
+    def compute_radiance_from_map(self, unfitnum, sourcemap_, label=None,
+                                  save_packets=False):
         oldkey = f'model{unfitnum:02d}'
         oldinfo = self.model_info[oldkey]
         
@@ -456,7 +457,8 @@ class MESSENGERdata:
               overwrite=False,
               masking=None,
               label=None,
-              packs_per_it=None):
+              packs_per_it=None,
+              save_packets=False):
         """Run the nexoclom model with specified inputs and fit to the data.
         
         ** Parameters**
@@ -523,7 +525,7 @@ class MESSENGERdata:
         # simulate the data
         inputs.options.fitted = False
         model_result.simulate_data_from_inputs(inputs, npackets, overwrite,
-                                               packs_per_it)
+                                               packs_per_it, save_packets=save_packets)
         
         # Attach the model_result to the data
         modnum = len(self.model_info)
