@@ -6,7 +6,7 @@ import glob
 from scipy import io
 from astropy.time import Time
 from astropy import units as u
-from solarsystemMB import SSObject, planet_geometry
+from nexoclom.solarsystem import SSObject, planet_geometry
 from .database_setup import database_connect
 
 
