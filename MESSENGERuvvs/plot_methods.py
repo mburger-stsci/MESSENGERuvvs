@@ -207,11 +207,11 @@ def plot_plotly(self, filename=None):
     dmax = self.data.radiance.max()
     
     # Add in the model lines
-    colors = {'model0':'red',
-              'model1':'green',
-              'model2':'blue',
-              'model3':'cyan',
-              'model4':'purple'}
+    colors = {'model00':'red',
+              'model01':'green',
+              'model02':'blue',
+              'model03':'cyan',
+              'model04':'purple'}
     for modkey, result in self.model_result.items():
         maskkey = modkey.replace('model', 'mask')
         marker_line_color = self.data[maskkey].apply(

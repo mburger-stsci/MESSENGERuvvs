@@ -446,7 +446,7 @@ class MESSENGERdata:
         self.model_result[modkey] = model_result
         print(f'Model strength for {label} = {model_result.sourcerate}')
     
-    def plot(self, filename=None, plot_method='plotly', show=False):
+    def plot(self, filename=None, plot_method='plotly', show=False, savepng=False):
         if plot_method == 'plotly':
             app = plot_plotly(self, filename)
             if show:
@@ -455,7 +455,7 @@ class MESSENGERdata:
                 pass
             self.app = app
         elif plot_method == 'bokeh':
-            plot_bokeh(self, filename, show)
+            plot_bokeh(self, filename, show, savepng=savepng)
         else:
             print('Not a valid plotting method')
     
