@@ -12,8 +12,7 @@ from bokeh.io import export_png, curdoc
 from bokeh.themes import Theme
 
 import dash
-import dash_core_components as dcc
-import dash_html_components as html
+from dash import dcc, html
 import dash.dependencies as ddep
 import plotly.io as pio
 import plotly.graph_objects as go

@@ -5,7 +5,8 @@ import copy
 from astropy import units as u
 
 from nexoclom import Input, LOSResult
-from .database_setup import database_connect
+from nexoclom.utilities import NexoclomConfig
+from .database_setup import messengerdb_connect
 from .plot_methods import plot_bokeh, plot_plotly, plot_fitted
 
 
@@ -188,9 +189,11 @@ class MESSENGERdata:
         self.app = None  # Plotly app
         self.model_result = {}
         
+        config = NexoclomConfig()
+        
         if comparisons is None:
             # Return list of queryable fields
-            with database_connect() as con:
+            with messengerdb_connect() as con:
                 columns = pd.read_sql(
                     f'''SELECT * from {species}uvvsdata, {species}pointing
                         WHERE 1=2''', con)
@@ -203,7 +206,7 @@ class MESSENGERdata:
                         WHERE unum=pnum and ({comparisons})
                         ORDER BY unum'''
             try:
-                with database_connect() as con:
+                with messengerdb_connect() as con:
                     data = pd.read_sql(query, con)
             except Exception:
                 print('Requested data:')
@@ -225,7 +228,7 @@ class MESSENGERdata:
                                     FROM {species}spectra
                                     WHERE snum in {data.index.to_list()}'''
                     specquery = specquery.replace('[', '(').replace(']', ')')
-                    with database_connect() as con:
+                    with messengerdb_connect() as con:
                         spectra = pd.read_sql(specquery, con)
                     
                     spectra.set_index('snum', inplace=True)
