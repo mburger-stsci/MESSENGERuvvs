@@ -7,7 +7,7 @@ from scipy import io
 from astropy.time import Time
 from astropy import units as u
 from nexoclom.solarsystem import SSObject, planet_geometry
-from nexoclom.utilities.database_connect import NexoclomConfig
+from nexoclom.utilities.NexoclomConfig import NexoclomConfig
 from nexoclom.utilities.exceptions import ConfigfileError
 from MESSENGERuvvs.database_setup import messengerdb_connect
 
@@ -382,7 +382,7 @@ def initialize_MESSENGERdata(configfile=None, idl_convert=False,
     if to_level1:
         l1files = process_L0_pickle(pfiles)
     else:
-        config = NexoclomConfig(configfile=configfile)
+        config = NexoclomConfig()
         if 'mesdatapath' in config.__dict__:
             l1files = glob.glob(os.path.join(config.mesdatapath, '*L1.pkl'))
         else:
