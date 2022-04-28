@@ -6,17 +6,24 @@ import glob
 from scipy import io
 from astropy.time import Time
 from astropy import units as u
+from sqlalchemy import text
 from nexoclom.solarsystem import SSObject, planet_geometry
 from nexoclom.utilities.NexoclomConfig import NexoclomConfig
 from nexoclom.utilities.exceptions import ConfigfileError
-from MESSENGERuvvs.database_setup import messengerdb_connect
 
 
-def create_merc_year_table(con):
+def create_merc_year_table(config):
     """Insert/read start date for each Mercury year from database.
 
     This creates and reads from database table *MESmercyear*
     """
+    with config.database_connect(config.mesdatabase) as con:
+        cur = con.cursor()
+        cur.execute('''CREATE table MESmercyear
+                         (yrnum int PRIMARY KEY,
+                          yrstart timestamp,
+                          yrend timestamp);''')
+
     tstart = Time('2011-03-18T00:00:00', format='isot', scale='utc')
     tend = Time('2015-05-02T23:59:59', format='isot', scale='utc')
     
@@ -31,23 +38,21 @@ def create_merc_year_table(con):
     sttimes = np.append(times[0], times[q])
     endtimes = np.append(times[q], times[-1])
     
-    cur = con.cursor()
-    cur.execute('''CREATE table MESmercyear
-                     (yrnum int PRIMARY KEY,
-                      yrstart timestamp,
-                      yrend timestamp)''')
     for i, d in enumerate(zip(sttimes, endtimes)):
-        cur.execute(f'''INSERT into MESmercyear
-                        values ({i}, '{d[0].iso}', '{d[1].iso}')''')
+        with config.database_connect(config.mesdatabase) as con:
+            cur = con.cursor()
+            cur.execute(f'''INSERT into MESmercyear
+                            values ({i}, '{d[0].iso}', '{d[1].iso}');''')
 
 
-def determine_mercyear(datatime, configfile=None):
-    with messengerdb_connect(configfile) as con:
-        yrnum = pd.read_sql('SELECT * from MESmercyear', con)
+def determine_mercyear(datatime, config):
+    with config.create_engine(config.mesdatabase).connect() as con:
+        yrnum = pd.read_sql(text('SELECT * from MESmercyear'), con)
     
+    datatime_ = datatime.apply(pd.Timestamp)
     myear = np.zeros((len(datatime),), dtype=int) - 1
     for _, yr in yrnum.iterrows():
-        q = (datatime >= yr.yrstart) & (datatime < yr.yrend)
+        q = (datatime_ >= yr.yrstart) & (datatime_ < yr.yrend)
         myear[q] = yr.yrnum
     
     assert np.all(myear > -1)
@@ -84,6 +89,7 @@ def convert_IDL_to_pickle(path_to_out, path_for_pkl):
             pickle.dump(pydict, pfile)
          
     return picklefiles
+
     
 def process_L0_pickle(picklefiles):
     mercury = SSObject('Mercury')
@@ -104,7 +110,7 @@ def process_L0_pickle(picklefiles):
         t_iso = [f"20{time[0:2].decode('utf-8')}:{time[2:5].decode('utf-8')}:"
                  f"{time[6:].decode('utf-8')}"
                  for time in data['step_utc_time']]
-        UTC = Time(t_iso, format='yday')
+        UTC = Time(t_iso, format='yday').iso
         
         # Orbit number for each data spectrum
         orbit = np.array([int(o) for o in data['orb_num']])
@@ -216,7 +222,7 @@ def process_L0_pickle(picklefiles):
              'solarfit': solarfit})
         
         # save this for later
-        newfile = picklefile.replace('L0.pkl', 'L1.pkl')
+        newfile = picklefile.replace('L0.pkl', 'L1.pkl').replace('Level0', 'Level1')
         print(f'Saving {newfile}')
         l1files.append(newfile)
         ndata.to_pickle(newfile)
@@ -225,30 +231,30 @@ def process_L0_pickle(picklefiles):
     return l1files
     
  
-def set_up_database(l1files, configfile=None):
-    config = NexoclomConfig(configfile=configfile)
-    if 'mesdatabase' in config.__dict__:
-        messengerdb = config.mesdatabase
-    else:
+def set_up_database(l1files):
+    config = NexoclomConfig()
+    
+    if 'mesdatabase' not in config.__dict__:
         raise ConfigfileError('mesdatabase', config.configfile)
+    else:
+        pass
     
     # Set up database
     try:
-        os.system(f'dropdb {messengerdb}')
+        os.system(f'dropdb {config.mesdatabase}')
     except:
         pass
-    
-    os.system(f'createdb {messengerdb}')
-    
-    with messengerdb_connect(configfile) as con:
-        cur = con.cursor()
-        
-        print('creating MESmercyear table')
-        create_merc_year_table(con)
 
-        print('creating UVVS tables')
-        spec = ['Ca', 'Na', 'Mg']
-        for sp in spec:
+    os.system(f'createdb {config.mesdatabase}')
+
+    print('creating MESmercyear table')
+    create_merc_year_table(config)
+
+    print('creating UVVS tables')
+    spec = ['Ca', 'Na', 'Mg']
+    for sp in spec:
+        with config.database_connect(config.mesdatabase) as con:
+            cur = con.cursor()
             # Table with spectrum information
             print(f'Creating {sp}uvvsdata')
             cur.execute(f'''CREATE table {sp}uvvsdata (
@@ -265,7 +271,7 @@ def set_up_database(l1files, configfile=None):
                                g float,
                                radiance float,
                                sigma float)''')
-            
+
             # Table with MESSENGER geometry and UVVS pointing
             print(f'Creating {sp}pointing')
             cur.execute(f'''CREATE table {sp}pointing (
@@ -287,7 +293,7 @@ def set_up_database(l1files, configfile=None):
                                lattan float,
                                loctimetan float,
                                slit text)''')  # Not including slit corners
-            
+
             # Table with spectra
             print(f'Creating {sp}spectra')
             cur.execute(f'''CREATE table {sp}spectra (
@@ -298,100 +304,109 @@ def set_up_database(l1files, configfile=None):
                                 dark float[],
                                 solarfit float[])''')
  
-        for l1file in l1files:
-            print(f'Processing {l1file}')
-            ndata = pd.read_pickle(l1file)
-            species = ndata.species.unique()
-            if len(species) == 1:
-                species = species[0]
-            else:
-                assert False
-                
-            # add Mercury year
-            ndata['merc_year'] = determine_mercyear(ndata.UTC, configfile)
+    for l1file in l1files:
+        print(f'Processing {l1file}')
+        ndata = pd.read_pickle(l1file)
+        species = ndata.species.unique()
+        if len(species) == 1:
+            species = species[0]
+        else:
+            assert False
             
-            print('Inserting UVVS data')
-            print(f'Saving {species} Data')
-            
-            # subset = ndata[['species', 'frame', 'UTC', 'orbit', 'merc_year',
-            #                 'TAA', 'rmerc', 'drdt', 'subslong', 'g',
-            #                 'radiance', 'sigma']]
-            # with messengerdb_connect(configfile) as con:
-            #     subset.to_sql(messengerdb, con)
-            
+        # add Mercury year
+        ndata['merc_year'] = determine_mercyear(ndata.UTC, config)
+        
+        print('Inserting UVVS data')
+        print(f'Saving {species} Data')
+        
+        data_query = text(
+            f'''INSERT into {species}uvvsdata (species, frame, UTC, orbit,
+                    merc_year, taa, rmerc, drdt, subslong, g, radiance,
+                    sigma)
+                VALUES (:species, :frame, :UTC, :orbit, :merc_year, :taa,
+                        :rmerc, :drdt, :subslong, :g, :radiance, :sigma)''')
+        
+        point_query = text(
+            f'''INSERT into {species}pointing (x, y, z, xbore, ybore, zbore,
+                    obstype, obstype_num, xtan, ytan, ztan,
+                    rtan, alttan, longtan, lattan,
+                    loctimetan, slit)
+                VALUES (:x, :y, :z, :xbore, :ybore, :zbore, :obstype,
+                    :obstype_num, :xtan, :ytan, :ztan, :rtan, :alttan,
+                    :longtan, :lattan, :loctimetan, :slit)''')
+                    
+        with config.create_engine(config.mesdatabase).begin() as con:
             for i, dpoint in ndata.iterrows():
-                cur.execute(f'''INSERT into {species}uvvsdata (
-                                    species, frame, UTC, orbit, merc_year,
-                                    taa, rmerc, drdt, subslong, g, radiance,
-                                    sigma) values (
-                                    '{dpoint.species}',
-                                    '{dpoint.frame}',
-                                    '{dpoint.UTC.iso}',
-                                    {dpoint.orbit},
-                                    {dpoint.merc_year},
-                                    {dpoint.TAA},
-                                    {dpoint.rmerc},
-                                    {dpoint.drdt},
-                                    {dpoint.subslong},
-                                    {dpoint.g},
-                                    {dpoint.radiance},
-                                    {dpoint.sigma})''')
-                cur.execute(f'''INSERT into {species}pointing (
-                                    x, y, z, xbore, ybore, zbore,
-                                    obstype, obstype_num, xtan, ytan, ztan,
-                                    rtan, alttan, longtan, lattan,
-                                    loctimetan, slit) values (
-                                    {dpoint.x},
-                                    {dpoint.y},
-                                    {dpoint.z},
-                                    {dpoint.xbore},
-                                    {dpoint.ybore},
-                                    {dpoint.zbore},
-                                    '{dpoint.obstype}',
-                                    {dpoint.obstype_num},
-                                    {dpoint.xtan},
-                                    {dpoint.ytan},
-                                    {dpoint.ztan},
-                                    {dpoint.rtan},
-                                    {dpoint.alttan},
-                                    {dpoint.longtan},
-                                    {dpoint.lattan},
-                                    {dpoint.loctimetan},
-                                    '{dpoint.slit}')''')
+                data_values = {'species': dpoint.species,
+                                'frame': dpoint.frame,
+                                'UTC': dpoint.UTC,
+                                'orbit': dpoint.orbit,
+                                'merc_year': dpoint.merc_year,
+                                'taa': dpoint.TAA,
+                                'rmerc': dpoint.rmerc,
+                                'drdt': dpoint.drdt,
+                                'subslong': dpoint.subslong,
+                                'g': dpoint.g,
+                                'radiance': dpoint.radiance,
+                                'sigma': dpoint.sigma}
+                con.execute(data_query, data_values)
                 
-            spectra = pd.read_pickle(l1file.replace('.pkl', '_spectra.pkl'))
-            print(f'Saving {species} Spectra')
-            for i, spec in spectra.iterrows():
-                cur.execute(f'''INSERT into {species}spectra (wavelength,
-                                    calibrated, raw, dark, solarfit) values (
-                                    %s, %s, %s, %s, %s)''',
-                            (spec.wavelength.tolist(), spec.spectra.tolist(),
-                             spec.raw.tolist(), spec.dark.tolist(),
-                             spec.solarfit.tolist()))
+                point_values = {'x': dpoint.x,
+                                'y': dpoint.y,
+                                'z': dpoint.z,
+                                'xbore': dpoint.xbore,
+                                'ybore': dpoint.ybore,
+                                'zbore': dpoint.zbore,
+                                'obstype': dpoint.obstype,
+                                'obstype_num': dpoint.obstype_num,
+                                'xtan': dpoint.xtan,
+                                'ytan': dpoint.ytan,
+                                'ztan': dpoint.ztan,
+                                'rtan': dpoint.rtan,
+                                'alttan': dpoint.alttan,
+                                'longtan': dpoint.longtan,
+                                'lattan': dpoint.lattan,
+                                'loctimetan': dpoint.loctimetan,
+                                'slit': dpoint.slit}
+                con.execute(point_query, point_values)
+                
+        spectra = pd.read_pickle(l1file.replace('.pkl', '_spectra.pkl'))
+        print(f'Saving {species} Spectra')
+        spec_query = text(
+            f'''INSERT into {species}spectra (wavelength,
+                    calibrated, raw, dark, solarfit)
+                VALUES (:wavelength, :calibrated, :raw, :dark, :solarfit)''')
+        with config.create_engine(config.mesdatabase).begin() as con:
+            for i, spectrum in spectra.iterrows():
+                spec_values = {'wavelength': spectrum.wavelength.tolist(),
+                               'calibrated': spectrum.corrected.tolist(),
+                               'spectra': spectrum.spectra.tolist(),
+                               'raw': spectrum.raw.tolist(),
+                               'dark': spectrum.dark.tolist(),
+                               'solarfit': spectrum.solarfit.tolist()}
+                con.execute(spec_query, spec_values)
 
-def initialize_MESSENGERdata(configfile=None, idl_convert=False,
-                             to_level1=False, to_sql=True):
+
+def initialize_MESSENGERdata(idl_convert=False, to_level1=False, to_sql=True):
     if idl_convert:
         pfiles = convert_IDL_to_pickle(
             '/Users/mburger/Work/Data/MESSENGER/ModelData/SummaryFiles/V0001',
-            '/Users/mburger/Work/Data/MESSENGER/ModelData/')
+            '/Users/mburger/Work/Data/MESSENGER/ModelData/Level0')
     else:
         pfiles = glob.glob(
-            '/Users/mburger/Work/Data/MESSENGER/ModelData/*L0.pkl')
+            '/Users/mburger/Work/Data/MESSENGER/ModelData/Level0/*L0.pkl')
         
     if to_level1:
         l1files = process_L0_pickle(pfiles)
     else:
         config = NexoclomConfig()
-        if 'mesdatapath' in config.__dict__:
-            l1files = glob.glob(os.path.join(config.mesdatapath, '*L1.pkl'))
-        else:
-            raise ConfigfileError('mesdatapath', config.configfile)
+        l1files = glob.glob(os.path.join(config.mesdatapath, 'Level1', '*L1.pkl'))
         
     if to_sql:
-        set_up_database(l1files, configfile)
+        set_up_database(l1files)
     else:
         pass
+
 
 if __name__ == '__main__':
     initialize_MESSENGERdata(to_level1=False, to_sql=True)

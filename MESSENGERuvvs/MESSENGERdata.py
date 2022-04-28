@@ -3,10 +3,10 @@ import numpy as np
 import pandas as pd
 import copy
 from astropy import units as u
+from sqlalchemy import text
 
 from nexoclom import Input, LOSResult
 from nexoclom.utilities import NexoclomConfig
-from .database_setup import messengerdb_connect
 from .plot_methods import plot_bokeh, plot_plotly, plot_fitted
 
 
@@ -193,7 +193,7 @@ class MESSENGERdata:
         
         if comparisons is None:
             # Return list of queryable fields
-            with messengerdb_connect() as con:
+            with () as con:
                 columns = pd.read_sql(
                     f'''SELECT * from {species}uvvsdata, {species}pointing
                         WHERE 1=2''', con)
@@ -202,11 +202,11 @@ class MESSENGERdata:
                 print(f'\t{col}')
         else:
             # Run the query and try to make the object
-            query = f'''SELECT * from {species}uvvsdata, {species}pointing
-                        WHERE unum=pnum and ({comparisons})
-                        ORDER BY unum'''
+            query = text(f'''SELECT * from {species}uvvsdata, {species}pointing
+                             WHERE unum=pnum and ({comparisons})
+                             ORDER BY unum''')
             try:
-                with messengerdb_connect() as con:
+                with config.create_engine(config.mesdatabase).connect() as con:
                     data = pd.read_sql(query, con)
             except Exception:
                 print('Requested data:')
@@ -224,11 +224,11 @@ class MESSENGERdata:
                 data.set_index('unum', inplace=True)
                 
                 if load_spectra:
-                    specquery = f'''SELECT *
-                                    FROM {species}spectra
-                                    WHERE snum in {data.index.to_list()}'''
+                    specquery = text(f'''SELECT *
+                                         FROM {species}spectra
+                                         WHERE snum in {data.index.to_list()}''')
                     specquery = specquery.replace('[', '(').replace(']', ')')
-                    with messengerdb_connect() as con:
+                    with config.create_engine().connect() as con:
                         spectra = pd.read_sql(specquery, con)
                     
                     spectra.set_index('snum', inplace=True)
