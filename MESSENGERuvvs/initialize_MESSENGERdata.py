@@ -242,8 +242,8 @@ def set_up_database(l1files):
 
     os.system(f'createdb {config.mesdatabase}')
 
-    print('creating MESmercyear table')
-    create_merc_year_table(config)
+    # print('creating MESmercyear table')
+    # create_merc_year_table(config)
 
     print('creating UVVS tables')
     spec = ['Ca', 'Na', 'Mg']
