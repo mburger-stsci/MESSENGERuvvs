@@ -10,6 +10,10 @@ from sqlalchemy import text
 from nexoclom.solarsystem import SSObject, planet_geometry
 from nexoclom.utilities.NexoclomConfig import NexoclomConfig
 from nexoclom.utilities.exceptions import ConfigfileError
+from MESSENGERuvvs import __file__ as basefile
+
+
+basepath = os.path.dirname(basefile)
 
 
 def create_merc_year_table(config):
@@ -17,13 +21,6 @@ def create_merc_year_table(config):
 
     This creates and reads from database table *MESmercyear*
     """
-    with config.database_connect(config.mesdatabase) as con:
-        cur = con.cursor()
-        cur.execute('''CREATE table MESmercyear
-                         (yrnum int PRIMARY KEY,
-                          yrstart timestamp,
-                          yrend timestamp);''')
-
     tstart = Time('2011-03-18T00:00:00', format='isot', scale='utc')
     tend = Time('2015-05-02T23:59:59', format='isot', scale='utc')
     
@@ -38,16 +35,14 @@ def create_merc_year_table(config):
     sttimes = np.append(times[0], times[q])
     endtimes = np.append(times[q], times[-1])
     
-    for i, d in enumerate(zip(sttimes, endtimes)):
-        with config.database_connect(config.mesdatabase) as con:
-            cur = con.cursor()
-            cur.execute(f'''INSERT into MESmercyear
-                            values ({i}, '{d[0].iso}', '{d[1].iso}');''')
-
+    mercyear = pd.DataFrame({'yrnum': np.arange(len(sttimes), dtype=int),
+                             'yrstart': sttimes,
+                             'yrend': endtimes})
+    mercyear.to_pickle(os.path.join(basepath, 'data', 'MES_merc_year.pkl'))
+    
 
 def determine_mercyear(datatime, config):
-    with config.create_engine(config.mesdatabase).connect() as con:
-        yrnum = pd.read_sql(text('SELECT * from MESmercyear'), con)
+    yrnum = pd.read_pickle(os.path.join(basepath, 'data', 'MES_merc_year.pkl'))
     
     datatime_ = datatime.apply(pd.Timestamp)
     myear = np.zeros((len(datatime),), dtype=int) - 1
