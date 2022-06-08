@@ -350,7 +350,8 @@ class MESSENGERdata:
               overwrite=False,
               masking=None,
               label=None,
-              packs_per_it=None):
+              packs_per_it=None,
+              use_condor=False):
         """Run the nexoclom model with specified inputs and fit to the data.
 
         ** Parameters**
@@ -415,7 +416,7 @@ class MESSENGERdata:
         oldfit = inputs.options.fitted
         inputs.options.fitted = False
         inputs.geometry.taa = self.taa
-        inputs.run(npackets, packs_per_it, overwrite)
+        inputs.run(npackets, packs_per_it, overwrite, use_condor=use_condor)
         
         inputs.options.fitted = oldfit
 
