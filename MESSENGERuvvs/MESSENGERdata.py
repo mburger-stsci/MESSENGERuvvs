@@ -433,11 +433,16 @@ class MESSENGERdata:
             model_result.simulate_data_from_inputs(self)
         
         # Attach the model_result to the data
-        modnum = len(self.model_result)
-        modkey = f'model{modnum:02d}'
-        npackkey = f'npackets{modnum:02d}'
-        maskkey = f'mask{modnum:02d}'
-        
+        if label is None:
+            modnum = len(self.model_result)
+            modkey = f'model{modnum:02d}'
+            npackkey = f'npackets{modnum:02d}'
+            maskkey = f'mask{modnum:02d}'
+        else:
+            modkey = label
+            npackkey = f'npackets_{label}'
+            maskkey = f'mask_{label}'
+            
         self.data[modkey] = model_result.radiance.values
         self.data[npackkey] = model_result.npackets
         self.data[maskkey] = model_result.mask
