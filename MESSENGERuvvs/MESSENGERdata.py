@@ -436,13 +436,12 @@ class MESSENGERdata:
         if label is None:
             modnum = len(self.model_result)
             modkey = f'model{modnum:02d}'
-            npackkey = f'npackets{modnum:02d}'
-            maskkey = f'mask{modnum:02d}'
         else:
             modkey = label
-            npackkey = f'npackets_{label}'
-            maskkey = f'mask_{label}'
             
+        npackkey = f'npackets_{modkey}'
+        maskkey = f'mask_{modkey}'
+        
         self.data[modkey] = model_result.radiance.values
         self.data[npackkey] = model_result.npackets
         self.data[maskkey] = model_result.mask

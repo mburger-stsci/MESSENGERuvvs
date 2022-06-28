@@ -105,13 +105,12 @@ def plot_bokeh(self, filename=None, show=True, savepng=False):
         # fig0.line(x='utc', y=modkey, source=source,
         #           legend_label=result.label, color=c)
         
-        maskkey = modkey.replace('model', 'mask')
+        maskkey = f'mask_{modkey}'
         mask = (self.data[maskkey]).to_list()
         view = CDSView(source=source, filters=[BooleanFilter(mask)])
         modplots.append(fig0.circle(x='utc', y=modkey, size=9, color=c,
                                     source=source, legend_label=result.label,
                                     view=view))
-        maskkey = modkey.replace('model', 'mask')
         mask = np.logical_not(self.data[maskkey]).to_list()
         view = CDSView(source=source, filters=[BooleanFilter(mask)])
         maskedplots.append(fig0.circle(x='utc', y=modkey, size=9,
@@ -212,7 +211,7 @@ def plot_plotly(self, filename=None):
               'model03':'cyan',
               'model04':'purple'}
     for modkey, result in self.model_result.items():
-        maskkey = modkey.replace('model', 'mask')
+        maskkey = f'mask_{modkey}'
         marker_line_color = self.data[maskkey].apply(
                 lambda x:colors[modkey] if x else 'yellow')
         # marker = self.data[maskkey].apply(lambda x: 0 if x else 100)
@@ -599,14 +598,13 @@ def make_fitted_plot(self, result, filestart='fitted', show=True, ut=None,
             fig3.line(x='utc', y=modkey, source=source,
                       legend_label=result.label, color=c)
 
-            maskkey = modkey.replace('model', 'mask')
+            maskkey = f'mask_{modkey}'
             mask = self.data[maskkey].to_list()
             view = CDSView(source=source, filters=[BooleanFilter(mask)])
             modplots.append(fig3.circle(x='utc', y=modkey, size=7, color=c,
                                         source=source, legend_label=result.label,
                                         view=view))
             
-            maskkey = modkey.replace('model', 'mask')
             mask = np.logical_not(self.data[maskkey]).to_list()
             view = CDSView(source=source, filters=[BooleanFilter(mask)])
             maskedplots.append(fig3.circle(x='utc', y=modkey, size=7,
