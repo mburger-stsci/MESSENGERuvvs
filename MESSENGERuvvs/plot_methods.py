@@ -643,7 +643,7 @@ def make_fitted_plot(self, result, filestart='fitted', show=True, ut=None,
     return grid
 
 
-def plot_fitted(self, filestart=None, show=True, make_frames=False,
+def plot_fitted(self, label, filestart=None, show=True, make_frames=False,
                 smooth=False, savepng=False):
     # Check that the path exists
     if ((os.path.dirname(filestart) != '') and

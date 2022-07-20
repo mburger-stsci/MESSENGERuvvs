@@ -5,7 +5,7 @@ import copy
 from astropy import units as u
 from sqlalchemy import text
 
-from nexoclom import Input, LOSResult
+from nexoclom import Input, LOSResult, LOSResultFitted
 from nexoclom.utilities import NexoclomConfig
 from .plot_methods import plot_bokeh, plot_plotly, plot_fitted
 
@@ -338,9 +338,6 @@ class MESSENGERdata:
         else:
             assert 0, 'You somehow picked a bad combination.'
     
-    def simulate_determined_source(self, inputs, npackets):
-        pass
-    
     def model(self,
               inputs,
               npackets,
@@ -351,7 +348,9 @@ class MESSENGERdata:
               masking=None,
               label=None,
               packs_per_it=None,
-              use_condor=False):
+              compress=True,
+              use_condor=False,
+              label_for_fitted=None):
         """Run the nexoclom model with specified inputs and fit to the data.
 
         ** Parameters**
@@ -413,23 +412,24 @@ class MESSENGERdata:
         self.set_frame('Model')
         
         # Run the model with fitted = False to get the starting point.
-        oldfit = inputs.options.fitted
-        inputs.options.fitted = False
         inputs.geometry.taa = self.taa
-        inputs.run(npackets, packs_per_it, overwrite, use_condor=use_condor)
-        
-        inputs.options.fitted = oldfit
 
         # Create the LOSResult object
         params = {'quantity': 'radiance'}
-        model_result = LOSResult(self, inputs, params=params, dphi=dphi,
-                                 masking=masking, fit_method=fit_method,
-                                 label=label)
         
         # simulate the data
         if inputs.options.fitted:
-            model_result.determine_source_from_data(self)
+            model_result = LOSResultFitted(self, inputs, params=params, dphi=dphi,
+                                           masking=masking, fit_method=fit_method,
+                                           label=label)
+            assert label_for_fitted is not None
+            model_result.determine_source_from_data(self, label_for_fitted)
         else:
+            inputs.run(npackets, packs_per_it, overwrite, compress=compress,
+                       use_condor=use_condor)
+            model_result = LOSResult(self, inputs, params=params, dphi=dphi,
+                                     masking=masking, fit_method=fit_method,
+                                     label=label)
             model_result.simulate_data_from_inputs(self)
         
         # Attach the model_result to the data
@@ -441,7 +441,8 @@ class MESSENGERdata:
             
         npackkey = f'npackets_{modkey}'
         maskkey = f'mask_{modkey}'
-        
+
+        self.model_result[modkey] = model_result
         self.data[modkey] = model_result.radiance.values
         self.data[npackkey] = model_result.npackets
         self.data[maskkey] = model_result.mask
@@ -451,7 +452,6 @@ class MESSENGERdata:
         else:
             pass
         
-        self.model_result[modkey] = model_result
         print(f'Model strength for {label} = {model_result.sourcerate}')
     
     def plot(self, filename=None, plot_method='plotly', show=False, savepng=False):
@@ -467,7 +467,7 @@ class MESSENGERdata:
         else:
             print('Not a valid plotting method')
     
-    def plot_fitted_model(self, filestart='fitted', show=False,
+    def plot_fitted_model(self, label, filestart='fitted', show=False,
                           make_frames=False, smooth=False, savepng=False):
         plot_fitted(self, filestart, show, make_frames, smooth=smooth,
                     savepng=savepng)
