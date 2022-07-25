@@ -328,7 +328,7 @@ class MESSENGERdata:
                                               -self.data.xtan.copy())
             self.frame = 'Model'
         elif ((self.frame.casefold() == 'MODEL'.casefold()) and
-              (frame.casefold() == 'MODEL'.casefold())):
+              (frame.casefold() == 'MSO'.casefold())):
             self.data.x, self.data.y = -self.data.y.copy(), self.data.x.copy()
             self.data.xbore, self.data.ybore = (-self.data.ybore.copy(),
                                                 self.data.xbore.copy())
@@ -423,14 +423,15 @@ class MESSENGERdata:
                                            masking=masking, fit_method=fit_method,
                                            label=label)
             assert label_for_fitted is not None
-            model_result.determine_source_from_data(self, label_for_fitted)
+            model_result.determine_source_from_data(self, label_for_fitted,
+                                                    use_condor=use_condor)
         else:
             inputs.run(npackets, packs_per_it, overwrite, compress=compress,
                        use_condor=use_condor)
             model_result = LOSResult(self, inputs, params=params, dphi=dphi,
                                      masking=masking, fit_method=fit_method,
                                      label=label)
-            model_result.simulate_data_from_inputs(self)
+            model_result.simulate_data_from_inputs(self, use_condor=use_condor)
         
         # Attach the model_result to the data
         if label is None:
