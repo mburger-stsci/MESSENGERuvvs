@@ -4,7 +4,6 @@ import pandas as pd
 import copy
 from astropy import units as u
 from sqlalchemy import text
-
 from nexoclom import Input, LOSResult, LOSResultFitted
 from nexoclom.utilities import NexoclomConfig
 from .plot_methods import plot_bokeh, plot_plotly, plot_fitted
@@ -421,7 +420,7 @@ class MESSENGERdata:
         if inputs.options.fitted:
             model_result = LOSResultFitted(self, inputs, params=params, dphi=dphi,
                                            masking=masking, fit_method=fit_method,
-                                           label=label)
+                                           label=label, overwrite=overwrite)
             assert label_for_fitted is not None
             model_result.determine_source_from_data(self, label_for_fitted,
                                                     use_condor=use_condor)
