@@ -418,12 +418,11 @@ class MESSENGERdata:
         
         # simulate the data
         if inputs.options.fitted:
-            model_result = LOSResultFitted(self, inputs, params=params, dphi=dphi,
+            assert label_for_fitted in self.model_result.keys()
+            model_result = LOSResultFitted(self, label_for_fitted, params=params, dphi=dphi,
                                            masking=masking, fit_method=fit_method,
                                            label=label, overwrite=overwrite)
-            assert label_for_fitted is not None
-            model_result.determine_source_from_data(self, label_for_fitted,
-                                                    use_condor=use_condor)
+            model_result.determine_source_from_data(self, use_condor=use_condor)
         else:
             inputs.run(npackets, packs_per_it, overwrite, compress=compress,
                        use_condor=use_condor)
