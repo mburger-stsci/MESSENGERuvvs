@@ -5,8 +5,8 @@ import copy
 from astropy import units as u
 from sqlalchemy import text
 from nexoclom import Input, LOSResult, LOSResultFitted
-from nexoclom.utilities import NexoclomConfig
 from .plot_methods import plot_bokeh, plot_plotly, plot_fitted
+from MESSENGERuvvs import engine
 
 
 class InputError(Exception):
@@ -188,8 +188,6 @@ class MESSENGERdata:
         self.app = None  # Plotly app
         self.model_result = {}
         
-        config = NexoclomConfig()
-        
         if comparisons is None:
             # Return list of queryable fields
             with () as con:
@@ -205,7 +203,7 @@ class MESSENGERdata:
                              WHERE unum=pnum and ({comparisons})
                              ORDER BY unum''')
             try:
-                with config.create_engine(config.mesdatabase).connect() as con:
+                with engine.connect() as con:
                     data = pd.read_sql(query, con)
             except Exception:
                 print('Requested data:')
@@ -227,7 +225,7 @@ class MESSENGERdata:
                                          FROM {species}spectra
                                          WHERE snum in {data.index.to_list()}''')
                     specquery = specquery.replace('[', '(').replace(']', ')')
-                    with config.create_engine().connect() as con:
+                    with engine.connect() as con:
                         spectra = pd.read_sql(specquery, con)
                     
                     spectra.set_index('snum', inplace=True)
