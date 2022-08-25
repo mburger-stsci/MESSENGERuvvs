@@ -6,7 +6,12 @@ from astropy import units as u
 from sqlalchemy import text
 from nexoclom import Input, LOSResult, LOSResultFitted
 from .plot_methods import plot_bokeh, plot_plotly, plot_fitted
-from MESSENGERuvvs import engine
+from nexoclom.utilities import NexoclomConfig
+
+
+config = NexoclomConfig(verbose=False)
+config.verify_database_running()
+engine = config.create_engine(config.mesdatabase)
 
 
 class InputError(Exception):
