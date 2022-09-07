@@ -5,8 +5,9 @@ import copy
 from astropy import units as u
 from sqlalchemy import text
 from nexoclom import Input, LOSResult, LOSResultFitted
-from .plot_methods import plot_bokeh, plot_plotly, plot_fitted
 from nexoclom.utilities import NexoclomConfig
+from MESSENGERuvvs.plot_methods import plot_bokeh, plot_plotly, plot_fitted
+from MESSENGERuvvs.MESSENGERview import MESSENGERview
 
 
 config = NexoclomConfig(verbose=False)
@@ -534,3 +535,6 @@ class MESSENGERdata:
             subset.to_latex(filename)
         else:
             print('Valid output formats = csv, pkl, html, tex')
+            
+    def view_data(self):
+        MESSENGERview(self).app.run_server()
