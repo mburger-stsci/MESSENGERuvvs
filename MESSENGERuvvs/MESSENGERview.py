@@ -1,5 +1,4 @@
 import numpy as np
-import sys
 import pickle
 import PIL
 import dash
@@ -77,15 +76,15 @@ class MESSENGERview:
         
         
     def orientation_arrows(self):
-        sundir = go.Scatter3d(name='SunDir', x=[0, 5], y=[0, 0], z=[0, 0],
+        sundir = go.Scatter3d(name='SunDir', x=[0, 4], y=[0, 0], z=[0, 0],
                               mode='lines', hovertext='To Sun',
                               hoverinfo='text',
                               line={'width':5, 'color':'red'}, )
-        duskdir = go.Scatter3d(name='DuskDir', x=[0, 0], y=[0, 5], z=[0, 0],
+        duskdir = go.Scatter3d(name='DuskDir', x=[0, 0], y=[0, 4], z=[0, 0],
                                mode='lines', hovertext='To Dusk',
                                hoverinfo='text',
                                line={'width':5, 'color':'green'})
-        northdir = go.Scatter3d(name='NorthDir', x=[0, 0], y=[0, 0], z=[0, 5],
+        northdir = go.Scatter3d(name='NorthDir', x=[0, 0], y=[0, 0], z=[0, 4],
                                 mode='lines', hovertext='To North',
                                 hoverinfo='text',
                                 line={'width':5, 'color':'blue'})
@@ -161,11 +160,11 @@ class MESSENGERview:
         self.add_lines_of_sight()
         
         self.mercury_figure.update_layout(
-            {'scene':{'xaxis':{'range':[-10, 10],
+            {'scene':{'xaxis':{'range':[-6, 6],
                                'title':'Sunward (R_M)'},
-                      'yaxis':{'range':[-10, 10],
+                      'yaxis':{'range':[-6, 6],
                                'title':'Duskward (R_M)'},
-                      'zaxis':{'range':[-10, 10],
+                      'zaxis':{'range':[-6, 6],
                                'title':'Northward (R_M)'},
                                 'aspectratio':{'x':1,
                                                'y':1,
@@ -178,7 +177,7 @@ class MESSENGERview:
     def create_app(self):
         title_info = f'''
 # MESSENGER UVVS
-### {self.mdata.query}
+### {self.mdata.species}, {self.mdata.query}
 '''
         app = dash.Dash(f'MESSENGER UVVS Orbit Viewer',
                         external_stylesheets = ['https://codepen.io/chriddyp/pen/bWLwgP.css'])
@@ -188,15 +187,3 @@ class MESSENGERview:
             dash.dcc.Graph(id='OrbitFigure', figure=self.mercury_figure)])
 
         return app
-
-if __name__ == '__main__':
-    if len(sys.argv) != 3:
-        species = 'Ca'
-        query = 'orbit = 22'
-    else:
-        species = sys.argv[1]
-        query = sys.argv[2]
-    
-    mesview = MESSENGERview(species, query)
-    print('Starting App')
-    mesview.app.run_server(debug=True)

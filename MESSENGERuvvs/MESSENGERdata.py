@@ -536,5 +536,8 @@ class MESSENGERdata:
         else:
             print('Valid output formats = csv, pkl, html, tex')
             
-    def view_data(self):
-        MESSENGERview(self).app.run_server()
+    def view_data(self, savefile=None):
+        viewer = MESSENGERview(self)
+        if savefile is not None:
+            viewer.mercury_figure.write_html(savefile)
+        viewer.app.run_server()
