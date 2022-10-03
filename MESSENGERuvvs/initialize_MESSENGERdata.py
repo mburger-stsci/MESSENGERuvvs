@@ -401,7 +401,7 @@ def initialize_MESSENGERdata(idl_convert=False, to_level1=False, to_sql=True):
         set_up_database(l1files)
     else:
         pass
-
+    
 
 if __name__ == '__main__':
     initialize_MESSENGERdata(to_level1=False, to_sql=True)

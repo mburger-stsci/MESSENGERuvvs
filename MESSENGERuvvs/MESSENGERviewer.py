@@ -55,7 +55,7 @@ class MESSENGERviewer(MESSENGERview):
         app = dash.Dash(f'MESSENGER UVVS Orbit Viewer',
                         external_stylesheets = ['https://codepen.io/chriddyp/pen/bWLwgP.css'])
         app.layout = dash.dash.html.Div([
-            dash.dcc.Markdown(title_info),
+            dash.dcc.Markdown(title_info, id='TitleInfo'),
             dash.html.Table([
                 dash.html.Tr([  # Top row: Species, show MESSENGER orbit, Show Model
                     dash.html.Td([
@@ -82,6 +82,7 @@ class MESSENGERviewer(MESSENGERview):
 
         # Reveal Model panel
         @app.callback(
+             dash.Output('TitleInfo', 'text'),
              dash.Output('MesQuery', 'value'),
              dash.Output('OrbitFigure', 'figure'),
              
@@ -100,9 +101,13 @@ class MESSENGERviewer(MESSENGERview):
             else:
                 pass
             
+            title_info = f'''
+# MESSENGER UVVS
+### {self.mdata.species}, {self.mdata.query}
+'''
             self.mercury_figure.update_layout()
             print('figure updated')
-            return self.query, self.mercury_figure
+            return title_info, self.query, self.mercury_figure
 
         return app
     
