@@ -353,7 +353,7 @@ class MESSENGERdata:
               packs_per_it=None,
               compress=True,
               label_for_fitted=None,
-              distribute=True):
+              distribute=None):
         """Run the nexoclom model with specified inputs and fit to the data.
 
         ** Parameters**
@@ -423,8 +423,9 @@ class MESSENGERdata:
         # simulate the data
         if inputs.options.fitted:
             assert label_for_fitted in self.model_result.keys()
-            model_result = LOSResultFitted(self, label_for_fitted, params=params, dphi=dphi,
-                                           masking=masking, fit_method=fit_method,
+            model_result = LOSResultFitted(self, label_for_fitted, params=params,
+                                           dphi=dphi, masking=masking,
+                                           fit_method=fit_method,
                                            label=label, overwrite=overwrite)
             model_result.determine_source_from_data(self)
         else:
@@ -433,8 +434,8 @@ class MESSENGERdata:
             model_result = LOSResult(self, inputs, params=params, dphi=dphi,
                                      masking=masking, fit_method=fit_method,
                                      label=label)
-            model_result.simulate_data_from_inputs(self, distribute=True)
-        
+            model_result.simulate_data_from_inputs(self, distribute=distribute)
+            
         # Attach the model_result to the data
         if label is None:
             modnum = len(self.model_result)
