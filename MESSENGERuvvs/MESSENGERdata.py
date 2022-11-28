@@ -426,8 +426,8 @@ class MESSENGERdata:
             model_result = LOSResultFitted(self, label_for_fitted, params=params,
                                            dphi=dphi, masking=masking,
                                            fit_method=fit_method,
-                                           label=label, overwrite=overwrite)
-            model_result.determine_source_from_data(self)
+                                           label=label)
+            model_result.determine_source_from_data(self, overwrite=overwrite)
         else:
             inputs.run(npackets, packs_per_it, overwrite, compress=compress,
                        distribute=distribute)
