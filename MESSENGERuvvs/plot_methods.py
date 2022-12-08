@@ -31,7 +31,7 @@ def color_generator(pallette=Set1[9]):
         yield pallette[i]
 
 
-def plot_bokeh(self, filename=None, show=True, savepng=False):
+def plot_bokeh(self, filename=None, show=True, savepng=False, title=None):
     curdoc().theme = Theme(BOKEH_THEME_FILE)
     
     if filename is not None:
@@ -76,9 +76,13 @@ def plot_bokeh(self, filename=None, show=True, savepng=False):
     
     # Make the figure
     width, height = 1200, 600
+    if title is None:
+        title = f'{self.species}, {self.query}'
+    else:
+        pass
     fig0 = bkp.figure(plot_width=width, plot_height=height,
                       x_axis_type='datetime',
-                      title=f'{self.species}, {self.query}',
+                      title=title,
                       x_axis_label='UTC',
                       y_axis_label='Radiance (kR)',
                       y_range=[0, self.data.radiance.max()*1.5],
@@ -111,15 +115,16 @@ def plot_bokeh(self, filename=None, show=True, savepng=False):
         modplots.append(fig0.circle(x='utc', y=modkey, size=9, color=c,
                                     source=source, legend_label=result.label,
                                     view=view))
-        mask = np.logical_not(self.data[maskkey]).to_list()
-        view = CDSView(source=source, filters=[BooleanFilter(mask)])
-        maskedplots.append(fig0.circle(x='utc', y=modkey, size=9,
-                                       source=source, line_color=c,
-                                       fill_color='yellow', view=view,
-                                       legend_label=result.label +
-                                                    ' (Data Point Not Used)'))
         renderers.extend(modplots)
-        renderers.extend(maskedplots)
+        mask = np.logical_not(self.data[maskkey]).to_list()
+        if np.any(mask):
+            view = CDSView(source=source, filters=[BooleanFilter(mask)])
+            maskedplots.append(fig0.circle(x='utc', y=modkey, size=9,
+                                           source=source, line_color=c,
+                                           fill_color='yellow', view=view,
+                                           legend_label=result.label +
+                                                    ' (Data Point Not Used)'))
+            renderers.extend(maskedplots)
     
     datahover = HoverTool(tooltips=tips, renderers=renderers)
     fig0.add_tools(datahover)
@@ -604,15 +609,17 @@ def make_fitted_plot(self, result, filestart='fitted', show=True, ut=None,
             modplots.append(fig3.circle(x='utc', y=modkey, size=7, color=c,
                                         source=source, legend_label=result.label,
                                         view=view))
-            
-            mask = np.logical_not(self.data[maskkey]).to_list()
-            view = CDSView(source=source, filters=[BooleanFilter(mask)])
-            maskedplots.append(fig3.circle(x='utc', y=modkey, size=7,
-                                           source=source, line_color=c,
-                                           fill_color='yellow', view=view,
-                           legend_label=result.label + '(Data Point Not Used)'))
             renderers.extend(modplots)
-            renderers.extend(maskedplots)
+
+            mask = np.logical_not(self.data[maskkey]).to_list()
+            if np.any(mask):
+                view = CDSView(source=source, filters=[BooleanFilter(mask)])
+                maskedplots.append(fig3.circle(x='utc', y=modkey, size=7,
+                                               source=source, line_color=c,
+                                               fill_color='yellow', view=view,
+                                               legend_label=result.label +
+                                                            '(Data Point Not Used)'))
+                renderers.extend(maskedplots)
         
         if ut is not None:
             yr = fig3.y_range
