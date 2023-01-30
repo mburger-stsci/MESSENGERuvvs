@@ -8,5 +8,5 @@ from .initialize_MESSENGERdata import initialize_MESSENGERdata
 name = 'MESSENGERuvvs'
 __author__ = 'Matthew Burger'
 __email__ = 'mburger@stsci.edu'
-__version__ = '1.11.5'
-__date__ = '2022-12-08'
+__version__ = '1.11.6'
+__date__ = '2023-01-30'

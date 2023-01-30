@@ -353,7 +353,8 @@ class MESSENGERdata:
               packs_per_it=None,
               compress=True,
               label_for_fitted=None,
-              distribute=None):
+              distribute=None,
+              use_weighting=False):
         """Run the nexoclom model with specified inputs and fit to the data.
 
         ** Parameters**
@@ -426,7 +427,8 @@ class MESSENGERdata:
             model_result = LOSResultFitted(self, label_for_fitted, params=params,
                                            dphi=dphi, masking=masking,
                                            fit_method=fit_method,
-                                           label=label)
+                                           label=label,
+                                           use_weighting=use_weighting)
             model_result.determine_source_from_data(self, overwrite=overwrite)
         else:
             inputs.run(npackets, packs_per_it, overwrite, compress=compress,
