@@ -194,13 +194,20 @@ def process_L0_pickle(picklefiles):
              'obstype_num': data['obs_typ_num'],
              'xtan': tanpt[:, 0], 'ytan': tanpt[:, 1],
              'ztan': tanpt[:, 2], 'rtan': rtan,
-             'alttan': data['target_altitude_set'][:, 0],
+             # 'alttan': data['target_altitude_set'][:, 0],
+             'alttan': (rtan -1)*Rmerc,
              'minalt': data['minalt'],
              'longtan': data['target_longitude_set'][:, 0]*np.pi/180,
              'lattan': data['target_latitude_set'][:, 0]*np.pi/180,
              'loctimetan': data['obs_solar_localtime'],
              'slit': slit})
         ndata.fillna(-999, inplace=True)
+        from inspect import currentframe, getframeinfo
+        frameinfo = getframeinfo(currentframe())
+        print(frameinfo.filename, frameinfo.lineno)
+        from IPython import embed; embed()
+        import sys; sys.exit()
+        
         
         spectra = [spectra[i,:] for i in range(spectra.shape[0])]
         wavelength = [wavelength[i,:] for i in range(wavelength.shape[0])]
@@ -243,7 +250,7 @@ def set_up_database(l1files):
     os.system(f'createdb {config.mesdatabase}')
 
     # print('creating MESmercyear table')
-    # create_merc_year_table(config)
+    create_merc_year_table(config)
 
     print('creating UVVS tables')
     spec = ['Ca', 'Na', 'Mg']
