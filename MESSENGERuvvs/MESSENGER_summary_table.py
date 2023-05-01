@@ -9,7 +9,7 @@ config = NexoclomConfig(verbose=False)
 config.verify_database_running()
 engine = config.create_engine(config.mesdatabase)
 
-def create_MESSSENGER_summary():
+def create_MESSENGER_summary():
     # Create the database table
     metadata_obj = sqla.MetaData()
     summary = sqla.Table('uvvs_summary', metadata_obj,

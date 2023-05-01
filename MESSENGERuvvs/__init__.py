@@ -1,7 +1,7 @@
 from MESSENGERuvvs.MESSENGERdata import MESSENGERdata
 from MESSENGERuvvs.MESSENGERviewer import MESSENGERviewer
 from MESSENGERuvvs.MESSENGER_summary_table import (
-    create_MESSSENGER_summary, query_summary_table)
+    create_MESSENGER_summary, query_summary_table)
 from .initialize_MESSENGERdata import initialize_MESSENGERdata
 
 

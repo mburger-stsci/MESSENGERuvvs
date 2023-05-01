@@ -10,7 +10,7 @@ from sqlalchemy import text
 from nexoclom.solarsystem import SSObject, planet_geometry
 from nexoclom.utilities.NexoclomConfig import NexoclomConfig
 from nexoclom.utilities.exceptions import ConfigfileError
-from MESSENGERuvvs import __file__ as basefile
+from MESSENGERuvvs import __file__ as basefile #, create_MESSSENGER_summary
 
 
 basepath = os.path.dirname(basefile)
@@ -44,10 +44,10 @@ def create_merc_year_table(config):
 def determine_mercyear(datatime, config):
     yrnum = pd.read_pickle(os.path.join(basepath, 'data', 'MES_merc_year.pkl'))
     
-    datatime_ = datatime.apply(pd.Timestamp)
+    # datatime_ = datatime.apply(pd.Timestamp)
     myear = np.zeros((len(datatime),), dtype=int) - 1
     for _, yr in yrnum.iterrows():
-        q = (datatime_ >= yr.yrstart) & (datatime_ < yr.yrend)
+        q = (datatime >= yr.yrstart) & (datatime < yr.yrend)
         myear[q] = yr.yrnum
     
     assert np.all(myear > -1)
@@ -118,6 +118,7 @@ def process_L0_pickle(picklefiles):
         
         # Spacecraft position and boresight in MSO
         xyz = np.ndarray((npts, 3))
+        r = np.linalg.norm(xyz, axis=1)
         bore = np.ndarray((npts, 3))
         corn0 = np.ndarray((npts, 3))
         corn1 = np.ndarray((npts, 3))
@@ -147,9 +148,26 @@ def process_L0_pickle(picklefiles):
         
         # Determine tangent point
         t = -np.sum(xyz*bore, axis=1)
-        tanpt = xyz+bore*t[:, np.newaxis]
+        behind = t < 0
+        tanpt = xyz + bore*t[:, np.newaxis]
         rtan = np.linalg.norm(tanpt, axis=1)
+        alttan = (rtan - 1) * mercury.radius.value
+        lattan = np.arcsin(tanpt[:,2]/rtan)
+        lttan = (np.arctan2(tanpt[:, 1], tanpt[:, 0]) * 12/np.pi + 12) % 24
+        longtan = (np.arctan2(tanpt[:, 1], tanpt[:, 0]) + 2*np.pi) % (2*np.pi)
+
+        tanpt[behind,:] = 1e30
+        rtan[behind] = 1e30
+        alttan[behind] = 1e30
+        lattan[behind] = np.nan
+        lttan[behind] = np.nan
+        longtan[behind] = np.nan
         
+        below = alttan < 0
+        alttan[below] = 0
+        tanpt[below, :] /= rtan[below, np.newaxis]
+        rtan[below] = 1
+
         slit = np.array(['Surface'
                          if s == 0
                          else 'Atmospheric'
@@ -192,22 +210,21 @@ def process_L0_pickle(picklefiles):
              'zcorn3': zcorner[:, 2], 'zcorn4': zcorner[:, 3],
              'obstype': obstype,
              'obstype_num': data['obs_typ_num'],
-             'xtan': tanpt[:, 0], 'ytan': tanpt[:, 1],
-             'ztan': tanpt[:, 2], 'rtan': rtan,
-             # 'alttan': data['target_altitude_set'][:, 0],
-             'alttan': (rtan -1)*Rmerc,
+             'xtan': tanpt[:, 0],
+             'ytan': tanpt[:, 1],
+             'ztan': tanpt[:, 2],
+             'rtan': rtan,
+             'alttan': alttan,
+             'longtan': longtan,
+             'lattan': lattan,
+             'loctimetan': lttan,
              'minalt': data['minalt'],
-             'longtan': data['target_longitude_set'][:, 0]*np.pi/180,
-             'lattan': data['target_latitude_set'][:, 0]*np.pi/180,
-             'loctimetan': data['obs_solar_localtime'],
+             # 'longtan': data['target_longitude_set'][:, 0]*np.pi/180, #IAU coords
+             # 'lattan': data['target_latitude_set'][:, 0]*np.pi/180,
+             # 'alttan': data['target_altitude_set'][:, 0],
+             # 'loctimetan': data['obs_solar_localtime'], ## This is s/c LT
              'slit': slit})
         ndata.fillna(-999, inplace=True)
-        from inspect import currentframe, getframeinfo
-        frameinfo = getframeinfo(currentframe())
-        print(frameinfo.filename, frameinfo.lineno)
-        from IPython import embed; embed()
-        import sys; sys.exit()
-        
         
         spectra = [spectra[i,:] for i in range(spectra.shape[0])]
         wavelength = [wavelength[i,:] for i in range(wavelength.shape[0])]
@@ -390,13 +407,13 @@ def set_up_database(l1files):
 
 
 def initialize_MESSENGERdata(idl_convert=False, to_level1=False, to_sql=True):
+    config = NexoclomConfig()
     if idl_convert:
         pfiles = convert_IDL_to_pickle(
-            '/Users/mburger/Work/Data/MESSENGER/ModelData/SummaryFiles/V0001',
-            '/Users/mburger/Work/Data/MESSENGER/ModelData/Level0')
+            os.path.join(config.mesdatapath, 'SummaryFiles', 'V0001'),
+            os.path.join(config.mesdatapath, 'Level0'))
     else:
-        pfiles = glob.glob(
-            '/Users/mburger/Work/Data/MESSENGER/ModelData/Level0/*L0.pkl')
+        pfiles = glob.glob(os.path.join(config.mesdatapath, 'Level0', '*'))
         
     if to_level1:
         l1files = process_L0_pickle(pfiles)
@@ -412,3 +429,4 @@ def initialize_MESSENGERdata(idl_convert=False, to_level1=False, to_sql=True):
 
 if __name__ == '__main__':
     initialize_MESSENGERdata(to_level1=False, to_sql=True)
+    # create_MESSSENGER_summary()

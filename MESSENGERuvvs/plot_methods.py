@@ -80,7 +80,7 @@ def plot_bokeh(self, filename=None, show=True, savepng=False, title=None):
         title = f'{self.species}, {self.query}'
     else:
         pass
-    fig0 = bkp.figure(plot_width=width, plot_height=height,
+    fig0 = bkp.figure(width=width, height=height,
                       x_axis_type='datetime',
                       title=title,
                       x_axis_label='UTC',
@@ -136,7 +136,7 @@ def plot_bokeh(self, filename=None, show=True, savepng=False, title=None):
     width, height = 1200, 600
     tools = ['pan', 'box_zoom', 'wheel_zoom', 'box_select',
              'hover', 'reset', 'save']
-    fig1 = bkp.figure(plot_width=width, plot_height=height,
+    fig1 = bkp.figure(width=width, height=height,
                       title=f'Tangent Point Location',
                       x_axis_label='Local Time (hr)',
                       y_axis_label='Latitude (deg)',
@@ -481,7 +481,7 @@ def make_fitted_plot(self, result, filestart='fitted', show=True, ut=None,
     source, packets = source[arg,:], packets[arg,:]
 
     # Distribution of available packets
-    fig0 = bkp.figure(plot_width=WIDTH, plot_height=HEIGHT,
+    fig0 = bkp.figure(width=WIDTH, height=HEIGHT,
                       title=f'{self.species}, {self.query}, Available Packets',
                       x_axis_label='Local Time (hr)',
                       y_axis_label='Latitude (deg)',
@@ -499,7 +499,7 @@ def make_fitted_plot(self, result, filestart='fitted', show=True, ut=None,
                x=0, y=-90, dw=24, dh=180, palette='Spectral11')
     
     # Distribution of packets used in the final model
-    fig1 = bkp.figure(plot_width=WIDTH, plot_height=HEIGHT,
+    fig1 = bkp.figure(width=WIDTH, height=HEIGHT,
                       title=f'{self.species}, {self.query}, Packets Used',
                       x_axis_label='Local Time (hr)',
                       y_axis_label='Latitude (deg)',
@@ -516,7 +516,7 @@ def make_fitted_plot(self, result, filestart='fitted', show=True, ut=None,
     fig1.image(image=[source.transpose()],
                x=0, y=-90, dw=24, dh=180, palette='Spectral11')
     
-    fig2 = bkp.figure(plot_width=WIDTH, plot_height=HEIGHT,
+    fig2 = bkp.figure(width=WIDTH, height=HEIGHT,
                       title=f'{self.species}, {self.query}, Speed Distribution',
                       x_axis_label='Speed (km/s)',
                       y_axis_label='Relative Number',
@@ -568,7 +568,7 @@ def make_fitted_plot(self, result, filestart='fitted', show=True, ut=None,
     else:
         pass
     
-    fig3 = bkp.figure(plot_width=WIDTH, plot_height=HEIGHT,
+    fig3 = bkp.figure(width=WIDTH, height=HEIGHT,
                       x_axis_type='datetime',
                       title=title_,
                       x_axis_label='UTC',
