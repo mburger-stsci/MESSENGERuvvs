@@ -4,7 +4,8 @@ import pandas as pd
 import copy
 from astropy import units as u
 from sqlalchemy import text
-from nexoclom import Input, LOSResult, LOSResultFitted
+from nexoclom import Input, LOSResult #, LOSResultFitted
+from nexoclom.data_simulation.LOSResultFitted_old import LOSResultFitted
 from nexoclom.utilities import NexoclomConfig
 from MESSENGERuvvs.plot_methods import plot_bokeh, plot_plotly, plot_fitted
 from MESSENGERuvvs.MESSENGERview import MESSENGERview
@@ -354,7 +355,7 @@ class MESSENGERdata:
               compress=True,
               label_for_fitted=None,
               distribute=None,
-              use_weighting=False):
+              use_weighting=True):
         """Run the nexoclom model with specified inputs and fit to the data.
 
         ** Parameters**
