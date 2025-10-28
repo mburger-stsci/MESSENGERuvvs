@@ -1,10 +1,15 @@
 import numpy as np
+import pandas as pd
 import pickle
 import PIL
+import spiceypy as spice
 import dash
 import plotly.io as pio
 import plotly.graph_objects as go
+from nexoclom import SSObject
 
+
+spice.furnsh('kernels/messenger_kernels.txt')
 
 class MESSENGERview:
     def __init__(self, data, layer='solar'):
@@ -105,10 +110,24 @@ class MESSENGERview:
                      'Tangent Latitude: %{customdata[3]:.1f}°')
         
         # Plot the orbit in black
-        orbit = go.Scatter3d(name='Orbit', x=self.mdata.data.x, y=self.mdata.data.y,
-                                 z=self.mdata.data.z, mode='markers',
-                                 marker={'size':3, 'color':'black'},
-                                 customdata=customdata, hovertemplate=hovertemp)
+        times = pd.date_range(self.mdata.data.utc.min(),
+                              self.mdata.data.utc.max(), freq='2min')
+        ets = [spice.str2et(t.isoformat()) for t in times]
+        mes_pos, _ = spice.spkpos('MESSENGER', ets, 'MSGR_MSO', 'NONE', 'Mercury')
+        
+        mercury = SSObject('Mercury')
+        mes_pos /= mercury.radius.value
+        
+        orbit = go.Scatter3d(name='Orbit', x=mes_pos[:,0], y=mes_pos[:,1],
+                             z=mes_pos[:,2], mode='lines',
+                             line={'color': 'black',
+                                   'width': 3})
+                                 # marker={'color':'black',
+                                 #         'size': 5})
+        # orbit = go.Scatter3d(name='Orbit', x=self.mdata.data.x, y=self.mdata.data.y,
+        #                          z=self.mdata.data.z, mode='markers',
+        #                          marker={'size':3, 'color':'black'},
+        #                          customdata=customdata, hovertemplate=hovertemp)
         self.mercury_figure.add_trace(orbit)
         self.mercury_figure.update_layout(showlegend=False)
      
@@ -137,6 +156,8 @@ class MESSENGERview:
                                                'cmin':0,
                                                'cmax':self.mdata.data.radiance.max(),
                                                'width':3},
+                                         marker={'color': 'yellow',
+                                                 'size': 1},
                                          mode='lines',
                                          customdata=customdata,
                                          hovertemplate=hovertemp)
@@ -160,11 +181,11 @@ class MESSENGERview:
         self.add_lines_of_sight()
         
         self.mercury_figure.update_layout(
-            {'scene':{'xaxis':{'range':[-6, 6],
+            {'scene':{'xaxis':{'range':[-4, 4],
                                'title':'Sunward (R_M)'},
-                      'yaxis':{'range':[-6, 6],
+                      'yaxis':{'range':[-4, 4],
                                'title':'Duskward (R_M)'},
-                      'zaxis':{'range':[-6, 6],
+                      'zaxis':{'range':[-6, 4],
                                'title':'Northward (R_M)'},
                                 'aspectratio':{'x':1,
                                                'y':1,

@@ -73,4 +73,4 @@ def query_summary_table(query):
     
 
 if __name__ == '__main__':
-    create_MESSSENGER_summary()
+    create_MESSENGER_summary()
