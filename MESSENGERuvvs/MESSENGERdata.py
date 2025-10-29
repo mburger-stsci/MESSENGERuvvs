@@ -4,16 +4,9 @@ import pandas as pd
 import copy
 from astropy import units as u
 from sqlalchemy import text
-from nexoclom import Input, LOSResult #, LOSResultFitted
-from nexoclom.data_simulation.LOSResultFitted_old import LOSResultFitted
 from nexoclom.utilities import NexoclomConfig
 from MESSENGERuvvs.plot_methods import plot_bokeh, plot_plotly, plot_fitted
 from MESSENGERuvvs.MESSENGERview import MESSENGERview
-
-
-config = NexoclomConfig(verbose=False)
-config.verify_database_running()
-engine = config.create_engine(config.mesdatabase)
 
 
 class InputError(Exception):

@@ -6,40 +6,13 @@ import glob
 from scipy import io
 from astropy.time import Time
 from astropy import units as u
-from sqlalchemy import text
-from nexoclom.solarsystem import SSObject, planet_geometry
-from nexoclom.utilities.NexoclomConfig import NexoclomConfig
-from nexoclom.utilities.exceptions import ConfigfileError
-from MESSENGERuvvs import __file__ as basefile #, create_MESSSENGER_summary
+import sqlalchemy as sqla
+from nexoclom2.solarsystem import SSObject
+from MESSENGERuvvs import __path__
+from MESSENGERuvvs.get_datapath import get_datapath
 
+basepath = __path__[0]
 
-basepath = os.path.dirname(basefile)
-
-
-def create_merc_year_table(config):
-    """Insert/read start date for each Mercury year from database.
-
-    This creates and reads from database table *MESmercyear*
-    """
-    tstart = Time('2011-03-18T00:00:00', format='isot', scale='utc')
-    tend = Time('2015-05-02T23:59:59', format='isot', scale='utc')
-    
-    times = Time(np.arange(tstart.mjd, tend.mjd), format='mjd', scale='utc')
-    taa = np.ndarray((len(times),))*u.rad
-    for i, time in enumerate(times):
-        geo = planet_geometry(time, 'Mercury')
-        taa[i] = geo['taa']
-        
-    diff = taa[:-1] - taa[1:]
-    q = np.where(diff > 0)[0]
-    sttimes = np.append(times[0], times[q])
-    endtimes = np.append(times[q], times[-1])
-    
-    mercyear = pd.DataFrame({'yrnum': np.arange(len(sttimes), dtype=int),
-                             'yrstart': sttimes,
-                             'yrend': endtimes})
-    mercyear.to_pickle(os.path.join(basepath, 'data', 'MES_merc_year.pkl'))
-    
 
 def determine_mercyear(datatime, config):
     yrnum = pd.read_pickle(os.path.join(basepath, 'data', 'MES_merc_year.pkl'))
@@ -251,26 +224,14 @@ def process_L0_pickle(picklefiles):
     
  
 def set_up_database(l1files):
-    config = NexoclomConfig()
+    datapath = get_datapath()
     
-    if 'mesdatabase' not in config.__dict__:
-        raise ConfigfileError('mesdatabase', config.configfile)
-    else:
-        pass
-    
-    # Set up database
-    try:
-        os.system(f'dropdb {config.mesdatabase}')
-    except:
-        pass
-
-    os.system(f'createdb {config.mesdatabase}')
-
     # print('creating MESmercyear table')
-    create_merc_year_table(config)
+    # create_merc_year_table(datapath)
 
     print('creating UVVS tables')
     spec = ['Ca', 'Na', 'Mg']
+    
     for sp in spec:
         with config.database_connect(config.mesdatabase) as con:
             cur = con.cursor()
@@ -407,19 +368,18 @@ def set_up_database(l1files):
 
 
 def initialize_MESSENGERdata(idl_convert=False, to_level1=False, to_sql=True):
-    config = NexoclomConfig()
+    datapath = get_datapath()
     if idl_convert:
         pfiles = convert_IDL_to_pickle(
-            os.path.join(config.mesdatapath, 'SummaryFiles', 'V0001'),
-            os.path.join(config.mesdatapath, 'Level0'))
+            os.path.join(datapath, 'SummaryFiles', 'V0001'),
+            os.path.join(datapath, 'Level0'))
     else:
-        pfiles = glob.glob(os.path.join(config.mesdatapath, 'Level0', '*'))
+        pfiles = glob.glob(os.path.join(datapath, 'Level0', '*'))
         
     if to_level1:
         l1files = process_L0_pickle(pfiles)
     else:
-        config = NexoclomConfig()
-        l1files = glob.glob(os.path.join(config.mesdatapath, 'Level1', '*L1.pkl'))
+        l1files = glob.glob(os.path.join(datapath, 'Level1', '*L1.pkl'))
         
     if to_sql:
         set_up_database(l1files)
