@@ -1,18 +1,15 @@
 """MESSENGER UVVS data class"""
+import os
 import numpy as np
 import pandas as pd
 import copy
 from astropy import units as u
-from sqlalchemy import text
-from nexoclom import Input, LOSResult, LOSResultFitted
-from nexoclom.utilities import NexoclomConfig
-from MESSENGERuvvs.plot_methods import plot_bokeh, plot_plotly, plot_fitted
+from astropy.time import Time
+import sqlalchemy as sqla
+from nexoclom2 import SSObject
+from MESSENGERuvvs.plot_methods import plot_bokeh, plot_plotly
 from MESSENGERuvvs.MESSENGERview import MESSENGERview
-
-
-config = NexoclomConfig(verbose=False)
-config.verify_database_running()
-engine = config.create_engine(config.mesdatabase)
+from MESSENGERuvvs.get_datapath import get_datapath
 
 
 class InputError(Exception):
@@ -177,37 +174,38 @@ class MESSENGERdata:
         >>> CaData.export('modelresults.csv')
         >>> CaData.export('modelresults.html', columns=['taa'])
 
-
     """
     
     def __init__(self, species, comparisons=None, load_spectra=False):
-        allspecies = ['Na', 'Ca', 'Mg']
+        allspecies = 'Na', 'Ca', 'Mg'
         if species in allspecies:
             self.species = species
         else:
             raise InputError('MESSENGERdata.__init__', f'{species} not valid.')
         
         self.frame = None
-        self.query = None
-        self.data = None
-        self.taa = None
         self.app = None  # Plotly app
         self.model_result = {}
         
+        datapath = get_datapath()
+        dbfile = os.path.join(datapath, 'Level2', f'MESSENGERuvvs{species}.sqlite')
+        engine = sqla.create_engine(f'sqlite:///{dbfile}')
+        metadata_obj = sqla.MetaData()
+        
+        data_table = sqla.Table('data', metadata_obj, autoload_with=engine)
+        
         if comparisons is None:
             # Return list of queryable fields
-            with () as con:
-                columns = pd.read_sql(
-                    f'''SELECT * from {species}uvvsdata, {species}pointing
-                        WHERE 1=2''', con)
-            print('Available fields are:')
-            for col in columns.columns:
+            data_columns = [str(col).split('.')[1] for col in data_table.columns]
+            print('Available columns')
+            for col in data_columns:
                 print(f'\t{col}')
         else:
             # Run the query and try to make the object
-            query = text(f'''SELECT * from {species}uvvsdata, {species}pointing
-                             WHERE unum=pnum and ({comparisons})
-                             ORDER BY unum''')
+            self.comparisons = self._format_comparisons(comparisons)
+            query = sqla.text(
+                f'SELECT * from data WHERE {comparisons} ORDER BY UTC')
+            
             try:
                 with engine.connect() as con:
                     data = pd.read_sql(query, con)
@@ -218,33 +216,43 @@ class MESSENGERdata:
                                  'Problem with comparisons given.')
             
             if len(data) > 0:
-                self.frame = data.frame[0]
-                self.query = self._format_query(comparisons)
-                self.taa = np.median(data.taa) * u.rad
-                
+                self.frame = data.iloc[0].frame
                 data.drop(['species', 'frame'], inplace=True, axis=1)
-                data.loc[data.alttan < 0, 'alttan'] = 1e10
-                data.set_index('unum', inplace=True)
+                data.set_index('index', inplace=True)
+                # data.loc[data.alttan < 0, 'alttan'] = 1e10
+                self.data = data
+                unit = SSObject('Mercury').unit
+                self.utc = np.array([Time(time) for time in data.UTC])
+                self.taa = (np.median(data.TAA)*u.rad).to(u.deg)
+                self.x = data.x.values*unit
+                self.y = data.y.values*unit
+                self.z = data.z.values*unit
+                self.r = np.sqrt(data.x**2 + data.y**2 + data.z**2)
+                self.orbit = data.orbit.values
+                self.radiance = data.radiance.values*u.kR
+                self.sigma = data.sigma.values*u.kR
+                self.xbore = data.xbore.values
+                self.ybore = data.ybore.values
+                self.zbore = data.zbore.values
+                self.xtan = data.xtan.values*u.s
+                self.ytan = data.ytan.values*u.s
+                self.ztan = data.ztan.values*u.s
+                self.rtan = data.rtan.values*u.s
+                self.alttan = data.alttan.values*u.km
+                self.longtan = (data.longtan.values*u.rad).to(u.deg)
+                self.lattan = (data.lattan.values*u.rad).to(u.deg)
+                self.loctimetan = data.loctimetan.values*u.hr
                 
                 if load_spectra:
-                    specquery = text(f'''SELECT *
-                                         FROM {species}spectra
-                                         WHERE snum in {data.index.to_list()}''')
-                    specquery = specquery.replace('[', '(').replace(']', ')')
-                    with engine.connect() as con:
-                        spectra = pd.read_sql(specquery, con)
+                    specfile = os.path.join(datapath, 'Level2',
+                                            f'MESSENGERuvvs{species}.pkl')
+                    spectra = pd.read_pickle(specfile)
+                    spectra = spectra[spectra.UTC.isin(self.data.UTC.values)]
                     
-                    spectra.set_index('snum', inplace=True)
-                    for r, row in spectra.iterrows():
-                        spectra.loc[r, 'wavelength'] = np.array(row.wavelength)
-                        spectra.loc[r, 'raw'] = np.array(row.raw)
-                        spectra.loc[r, 'solarfit'] = np.array(row.solarfit)
-                        spectra.loc[r, 'dark'] = np.array(row.dark)
-                        spectra.loc[r, 'calibrated'] = np.array(row.calibrated)
-                    self.data = data.merge(spectra, left_index=True,
-                                           right_index=True)
+                    assert len(spectra) == len(self.data)
+                    self.data = self.data.merge(spectra, on='UTC')
                 else:
-                    self.data = data
+                    pass
             else:
                 print(query)
                 print('No data found')
@@ -255,7 +263,7 @@ class MESSENGERdata:
     def __repr__(self):
         result = ('MESSENGER UVVS Data Object\n'
                   f'Species: {self.species}\n'
-                  f'Query: {self.query}\n'
+                  f'Comparisons: {self.comparisons}\n'
                   f'Frame: {self.frame}\n'
                   f'Object contains {len(self)} spectra.')
         return result
@@ -274,10 +282,30 @@ class MESSENGERdata:
             raise TypeError
         
         new = copy.deepcopy(self)
-        new.query = self.query + ' [Subset]'
+        new.comparisons = self.comparisons + ' [Subset]'
         new.taa = self.taa
         new.data = self.data.iloc[q].copy()
-        new.model_result = self.model_result
+        new.utc = self.utc[q]
+        new.taa = np.median(new.data.TAA)*u.rad
+        new.x = self.x[q]
+        new.y = self.y[q]
+        new.z = self.z[q]
+        new.r = self.r[q]
+        new.orbit = self.orbit[q]
+        new.radiance = self.radiance[q]
+        new.sigma = self.sigma[q]
+        new.xbore = self.xbore[q]
+        new.ybore = self.ybore[q]
+        new.zbore = self.zbore[q]
+        new.xtan = self.xtan[q]
+        new.ytan = self.ytan[q]
+        new.ztan = self.ztan[q]
+        new.rtan = self.rtan[q]
+        new.alttan = self.alttan[q]
+        new.longtan = self.longtan[q]
+        new.lattan = self.lattan[q]
+        new.loctimetan = self.loctimetan[q]
+        
         
         return new
     
@@ -292,7 +320,7 @@ class MESSENGERdata:
         return keys
     
     @staticmethod
-    def _format_query(comparison):
+    def _format_comparisons(comparison):
         """Try to impose some regularity on the query."""
         query = comparison.lower()
         
@@ -303,43 +331,6 @@ class MESSENGERdata:
             query = query.replace(f' {char}', char)
         
         return query
-    
-    def set_frame(self, frame=None):
-        """Convert between MSO and Model frames.
-
-        More frames could be added if necessary.
-        If Frame is not specified, flips between MSO and Model."""
-        if (frame is None) and (self.frame.casefold() == 'MSO'.casefold()):
-            frame = 'Model'
-        elif (frame is None) and (self.frame.casefold() == 'MODEL'.casefold()):
-            frame = 'MSO'
-        else:
-            pass
-        
-        allframes = ['MODEL'.casefold(), 'MSO'.casefold()]
-        if frame.casefold() not in allframes:
-            print('{} is not a valid frame.'.format(frame))
-        elif frame == self.frame:
-            pass
-        elif ((self.frame.casefold() == 'MSO'.casefold()) and
-              (frame.casefold() == 'MODEL'.casefold())):
-            # Convert from MSO to Model
-            self.data.x, self.data.y = self.data.y.copy(), -self.data.x.copy()
-            self.data.xbore, self.data.ybore = (self.data.ybore.copy(),
-                                                -self.data.xbore.copy())
-            self.data.xtan, self.data.ytan = (self.data.ytan.copy(),
-                                              -self.data.xtan.copy())
-            self.frame = 'Model'
-        elif ((self.frame.casefold() == 'MODEL'.casefold()) and
-              (frame.casefold() == 'MSO'.casefold())):
-            self.data.x, self.data.y = -self.data.y.copy(), self.data.x.copy()
-            self.data.xbore, self.data.ybore = (-self.data.ybore.copy(),
-                                                self.data.xbore.copy())
-            self.data.xtan, self.data.ytan = (-self.data.ytan.copy(),
-                                              self.data.xtan.copy())
-            self.frame = 'MSO'
-        else:
-            assert 0, 'You somehow picked a bad combination.'
     
     def model(self,
               inputs,
@@ -354,7 +345,7 @@ class MESSENGERdata:
               compress=True,
               label_for_fitted=None,
               distribute=None,
-              use_weighting=False):
+              use_weighting=True):
         """Run the nexoclom model with specified inputs and fit to the data.
 
         ** Parameters**
@@ -474,11 +465,6 @@ class MESSENGERdata:
         else:
             print('Not a valid plotting method')
     
-    def plot_fitted_model(self, label, filestart='fitted', show=False,
-                          make_frames=False, smooth=False, savepng=False):
-        plot_fitted(self, filestart, show, make_frames, smooth=smooth,
-                    savepng=savepng)
-    
     def export(self, filename, columns=('utc', 'radiance')):
         """Export data and models to a file.
         **Parameters**
@@ -540,8 +526,13 @@ class MESSENGERdata:
         else:
             print('Valid output formats = csv, pkl, html, tex')
             
-    def view_data(self, savefile=None):
+    def view_data(self, savefile=None, run_server=True):
         viewer = MESSENGERview(self)
         if savefile is not None:
             viewer.mercury_figure.write_html(savefile)
-        viewer.app.run_server()
+        else:
+            pass
+        if run_server:
+            viewer.app.run_server()
+        else:
+            pass

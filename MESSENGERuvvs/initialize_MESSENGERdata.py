@@ -6,40 +6,15 @@ import glob
 from scipy import io
 from astropy.time import Time
 from astropy import units as u
-from sqlalchemy import text
-from nexoclom.solarsystem import SSObject, planet_geometry
-from nexoclom.utilities.NexoclomConfig import NexoclomConfig
-from nexoclom.utilities.exceptions import ConfigfileError
-from MESSENGERuvvs import __file__ as basefile #, create_MESSSENGER_summary
+import sqlalchemy as sqla
+import spiceypy as spice
+from nexoclom2.solarsystem import SSObject
+from nexoclom2.solarsystem.load_kernels import SpiceKernels
+from MESSENGERuvvs import __path__
+from MESSENGERuvvs.get_datapath import get_datapath
 
+basepath = __path__[0]
 
-basepath = os.path.dirname(basefile)
-
-
-def create_merc_year_table(config):
-    """Insert/read start date for each Mercury year from database.
-
-    This creates and reads from database table *MESmercyear*
-    """
-    tstart = Time('2011-03-18T00:00:00', format='isot', scale='utc')
-    tend = Time('2015-05-02T23:59:59', format='isot', scale='utc')
-    
-    times = Time(np.arange(tstart.mjd, tend.mjd), format='mjd', scale='utc')
-    taa = np.ndarray((len(times),))*u.rad
-    for i, time in enumerate(times):
-        geo = planet_geometry(time, 'Mercury')
-        taa[i] = geo['taa']
-        
-    diff = taa[:-1] - taa[1:]
-    q = np.where(diff > 0)[0]
-    sttimes = np.append(times[0], times[q])
-    endtimes = np.append(times[q], times[-1])
-    
-    mercyear = pd.DataFrame({'yrnum': np.arange(len(sttimes), dtype=int),
-                             'yrstart': sttimes,
-                             'yrend': endtimes})
-    mercyear.to_pickle(os.path.join(basepath, 'data', 'MES_merc_year.pkl'))
-    
 
 def determine_mercyear(datatime, config):
     yrnum = pd.read_pickle(os.path.join(basepath, 'data', 'MES_merc_year.pkl'))
@@ -124,27 +99,39 @@ def process_L0_pickle(picklefiles):
         corn1 = np.ndarray((npts, 3))
         corn2 = np.ndarray((npts, 3))
         corn3 = np.ndarray((npts, 3))
-        for i in np.arange(npts):
-            xyz[i, :] = np.dot(data['mso_rotation_matrix'][i, :, :],
-                               data['planet_sc_vector_tg'][i, :]
-                               )/mercury.radius.value
-            bore[i, :] = np.dot(data['mso_rotation_matrix'][i, :, :],
-                                data['boresight_unit_vector_center_tg'][i, :])
-            corn0[i, :] = np.dot(data['mso_rotation_matrix'][i, :, :],
-                                 data['boresight_unit_vector_c1_tg'][i, :])
-            corn1[i, :] = np.dot(data['mso_rotation_matrix'][i, :, :],
-                                 data['boresight_unit_vector_c2_tg'][i, :])
-            corn2[i, :] = np.dot(data['mso_rotation_matrix'][i, :, :],
-                                 data['boresight_unit_vector_c3_tg'][i, :])
-            corn3[i, :] = np.dot(data['mso_rotation_matrix'][i, :, :],
-                                 data['boresight_unit_vector_c4_tg'][i, :])
         
-        xcorner = np.array([corn0[:, 0], corn1[:, 0],
-                            corn2[:, 0], corn3[:, 0]]).transpose()
-        ycorner = np.array([corn0[:, 1], corn1[:, 1],
-                            corn2[:, 1], corn3[:, 1]]).transpose()
-        zcorner = np.array([corn0[:, 2], corn1[:, 2],
-                            corn2[:, 2], corn3[:, 2]]).transpose()
+        kernels = SpiceKernels('Mercury')
+        for i in np.arange(npts):
+            # xyz[i, :] = np.dot(data['mso_rotation_matrix'][i, :, :],
+            #                    data['planet_sc_vector_tg'][i, :]
+            #                    )/mercury.radius.value
+            # bore[i, :] = np.dot(data['mso_rotation_matrix'][i, :, :],
+            #                     data['boresight_unit_vector_center_tg'][i, :])
+            # corn0[i, :] = np.dot(data['mso_rotation_matrix'][i, :, :],
+            #                      data['boresight_unit_vector_c1_tg'][i, :])
+            # corn1[i, :] = np.dot(data['mso_rotation_matrix'][i, :, :],
+            #                      data['boresight_unit_vector_c2_tg'][i, :])
+            # corn2[i, :] = np.dot(data['mso_rotation_matrix'][i, :, :],
+            #                      data['boresight_unit_vector_c3_tg'][i, :])
+            # corn3[i, :] = np.dot(data['mso_rotation_matrix'][i, :, :],
+            #                      data['boresight_unit_vector_c4_tg'][i, :])
+            
+            et = spice.str2et(UTC[i])
+            R = spice.pxform('IAU_MERCURY', 'MERCURYSOLAR', et)
+            
+            xyz[i,:] = np.matmul(R, data['planet_sc_vector_tg'][i,:])/mercury.radius.value
+            bore[i,:] = np.matmul(R, data['boresight_unit_vector_center_tg'][i,:])
+            corn0[i,:] = np.matmul(R, data['boresight_unit_vector_c1_tg'][i,:])
+            corn1[i,:] = np.matmul(R, data['boresight_unit_vector_c2_tg'][i,:])
+            corn2[i,:] = np.matmul(R, data['boresight_unit_vector_c3_tg'][i,:])
+            corn3[i,:] = np.matmul(R, data['boresight_unit_vector_c4_tg'][i,:])
+            
+        xcorner = np.column_stack([corn0[:, 0], corn1[:, 0],
+                                   corn2[:, 0], corn3[:, 0]])
+        ycorner = np.column_stack([corn0[:, 1], corn1[:, 1],
+                                   corn2[:, 1], corn3[:, 1]])
+        zcorner = np.column_stack([corn0[:, 2], corn1[:, 2],
+                                   corn2[:, 2], corn3[:, 2]])
         
         # Determine tangent point
         t = -np.sum(xyz*bore, axis=1)
@@ -153,8 +140,8 @@ def process_L0_pickle(picklefiles):
         rtan = np.linalg.norm(tanpt, axis=1)
         alttan = (rtan - 1) * mercury.radius.value
         lattan = np.arcsin(tanpt[:,2]/rtan)
-        lttan = (np.arctan2(tanpt[:, 1], tanpt[:, 0]) * 12/np.pi + 12) % 24
-        longtan = (np.arctan2(tanpt[:, 1], tanpt[:, 0]) + 2*np.pi) % (2*np.pi)
+        longtan = np.mod(np.arctan2(tanpt[:, 1], tanpt[:, 0]), 2*np.pi)
+        lttan = np.mod(longtan*12/np.pi + 12, 24)
 
         tanpt[behind,:] = 1e30
         rtan[behind] = 1e30
@@ -233,7 +220,8 @@ def process_L0_pickle(picklefiles):
         dark = [dark[i,:] for i in range(dark.shape[0])]
         solarfit = [solarfit[i,:] for i in range(solarfit.shape[0])]
         spectra = pd.DataFrame(
-            {'spectra': spectra,
+            {'UTC': UTC,
+             'spectra': spectra,
              'wavelength': wavelength,
              'raw': raw,
              'corrected': corrected,
@@ -251,175 +239,50 @@ def process_L0_pickle(picklefiles):
     
  
 def set_up_database(l1files):
-    config = NexoclomConfig()
+    datapath = get_datapath()
     
-    if 'mesdatabase' not in config.__dict__:
-        raise ConfigfileError('mesdatabase', config.configfile)
-    else:
-        pass
-    
-    # Set up database
-    try:
-        os.system(f'dropdb {config.mesdatabase}')
-    except:
-        pass
-
-    os.system(f'createdb {config.mesdatabase}')
-
     # print('creating MESmercyear table')
-    create_merc_year_table(config)
+    # create_merc_year_table(datapath)
 
     print('creating UVVS tables')
-    spec = ['Ca', 'Na', 'Mg']
-    for sp in spec:
-        with config.database_connect(config.mesdatabase) as con:
-            cur = con.cursor()
-            # Table with spectrum information
-            print(f'Creating {sp}uvvsdata')
-            cur.execute(f'''CREATE table {sp}uvvsdata (
-                               unum SERIAL PRIMARY KEY,
-                               species text,
-                               frame text,
-                               UTC timestamp,
-                               orbit int,
-                               merc_year int,
-                               taa float,
-                               rmerc float,
-                               drdt float,
-                               subslong float,
-                               g float,
-                               radiance float,
-                               sigma float)''')
-
-            # Table with MESSENGER geometry and UVVS pointing
-            print(f'Creating {sp}pointing')
-            cur.execute(f'''CREATE table {sp}pointing (
-                               pnum SERIAL PRIMARY KEY,
-                               x float,
-                               y float,
-                               z float,
-                               xbore float,
-                               ybore float,
-                               zbore float,
-                               obstype text,
-                               obstype_num int,
-                               xtan float,
-                               ytan float,
-                               ztan float,
-                               rtan float,
-                               alttan float,
-                               longtan float,
-                               lattan float,
-                               loctimetan float,
-                               slit text)''')  # Not including slit corners
-
-            # Table with spectra
-            print(f'Creating {sp}spectra')
-            cur.execute(f'''CREATE table {sp}spectra (
-                                snum SERIAL PRIMARY KEY,
-                                wavelength float[],
-                                calibrated float[],
-                                raw float[],
-                                dark float[],
-                                solarfit float[])''')
- 
-    for l1file in l1files:
-        print(f'Processing {l1file}')
-        ndata = pd.read_pickle(l1file)
-        species = ndata.species.unique()
-        if len(species) == 1:
-            species = species[0]
-        else:
-            assert False
+    species = 'Ca', 'Na', 'Mg'
+    
+    for sp in species:
+        files = [file for file in l1files
+                 if ((os.path.basename(file).lower().startswith(sp.lower())) and
+                     ('spectra' not in file))]
+        data = pd.concat([pd.read_pickle(file) for file in files])
+        data.sort_values('UTC', inplace=True)
+        
+        spectra = pd.concat([pd.read_pickle(file.replace('.pkl', '_spectra.pkl'))
+                             for file in files])
+        spectra.sort_values('UTC', inplace=True)
+        
+        dbfile = os.path.join(datapath, 'Level2', f'MESSENGERuvvs{sp}.sqlite')
+        engine = sqla.create_engine(f'sqlite:///{dbfile}',
+                                    connect_args={"autocommit": True})
+        with engine.connect() as con:
+            print(sp, 'data')
+            data.to_sql('data', con)
             
-        # add Mercury year
-        ndata['merc_year'] = determine_mercyear(ndata.UTC, config)
-        
-        print('Inserting UVVS data')
-        print(f'Saving {species} Data')
-        
-        data_query = text(
-            f'''INSERT into {species}uvvsdata (species, frame, UTC, orbit,
-                    merc_year, taa, rmerc, drdt, subslong, g, radiance,
-                    sigma)
-                VALUES (:species, :frame, :UTC, :orbit, :merc_year, :taa,
-                        :rmerc, :drdt, :subslong, :g, :radiance, :sigma)''')
-        
-        point_query = text(
-            f'''INSERT into {species}pointing (x, y, z, xbore, ybore, zbore,
-                    obstype, obstype_num, xtan, ytan, ztan,
-                    rtan, alttan, longtan, lattan,
-                    loctimetan, slit)
-                VALUES (:x, :y, :z, :xbore, :ybore, :zbore, :obstype,
-                    :obstype_num, :xtan, :ytan, :ztan, :rtan, :alttan,
-                    :longtan, :lattan, :loctimetan, :slit)''')
-                    
-        with config.create_engine(config.mesdatabase).begin() as con:
-            for i, dpoint in ndata.iterrows():
-                data_values = {'species': dpoint.species,
-                                'frame': dpoint.frame,
-                                'UTC': dpoint.UTC,
-                                'orbit': dpoint.orbit,
-                                'merc_year': dpoint.merc_year,
-                                'taa': dpoint.TAA,
-                                'rmerc': dpoint.rmerc,
-                                'drdt': dpoint.drdt,
-                                'subslong': dpoint.subslong,
-                                'g': dpoint.g,
-                                'radiance': dpoint.radiance,
-                                'sigma': dpoint.sigma}
-                con.execute(data_query, data_values)
-                
-                point_values = {'x': dpoint.x,
-                                'y': dpoint.y,
-                                'z': dpoint.z,
-                                'xbore': dpoint.xbore,
-                                'ybore': dpoint.ybore,
-                                'zbore': dpoint.zbore,
-                                'obstype': dpoint.obstype,
-                                'obstype_num': dpoint.obstype_num,
-                                'xtan': dpoint.xtan,
-                                'ytan': dpoint.ytan,
-                                'ztan': dpoint.ztan,
-                                'rtan': dpoint.rtan,
-                                'alttan': dpoint.alttan,
-                                'longtan': dpoint.longtan,
-                                'lattan': dpoint.lattan,
-                                'loctimetan': dpoint.loctimetan,
-                                'slit': dpoint.slit}
-                con.execute(point_query, point_values)
-                
-        spectra = pd.read_pickle(l1file.replace('.pkl', '_spectra.pkl'))
-        print(f'Saving {species} Spectra')
-        spec_query = text(
-            f'''INSERT into {species}spectra (wavelength,
-                    calibrated, raw, dark, solarfit)
-                VALUES (:wavelength, :calibrated, :raw, :dark, :solarfit)''')
-        with config.create_engine(config.mesdatabase).begin() as con:
-            for i, spectrum in spectra.iterrows():
-                spec_values = {'wavelength': spectrum.wavelength.tolist(),
-                               'calibrated': spectrum.corrected.tolist(),
-                               'spectra': spectrum.spectra.tolist(),
-                               'raw': spectrum.raw.tolist(),
-                               'dark': spectrum.dark.tolist(),
-                               'solarfit': spectrum.solarfit.tolist()}
-                con.execute(spec_query, spec_values)
+        print(sp, 'spectra')
+        specfile = os.path.join(datapath, 'Level2', f'MESSENGERuvvs{sp}.pkl')
+        spectra.to_pickle(specfile)
 
 
 def initialize_MESSENGERdata(idl_convert=False, to_level1=False, to_sql=True):
-    config = NexoclomConfig()
+    datapath = get_datapath()
     if idl_convert:
         pfiles = convert_IDL_to_pickle(
-            os.path.join(config.mesdatapath, 'SummaryFiles', 'V0001'),
-            os.path.join(config.mesdatapath, 'Level0'))
+            os.path.join(datapath, 'SummaryFiles', 'V0001'),
+            os.path.join(datapath, 'Level0'))
     else:
-        pfiles = glob.glob(os.path.join(config.mesdatapath, 'Level0', '*'))
+        pfiles = glob.glob(os.path.join(datapath, 'Level0', '*'))
         
     if to_level1:
         l1files = process_L0_pickle(pfiles)
     else:
-        config = NexoclomConfig()
-        l1files = glob.glob(os.path.join(config.mesdatapath, 'Level1', '*L1.pkl'))
+        l1files = glob.glob(os.path.join(datapath, 'Level1', '*L1.pkl'))
         
     if to_sql:
         set_up_database(l1files)
@@ -428,5 +291,5 @@ def initialize_MESSENGERdata(idl_convert=False, to_level1=False, to_sql=True):
     
 
 if __name__ == '__main__':
-    initialize_MESSENGERdata(to_level1=False, to_sql=True)
+    initialize_MESSENGERdata(to_level1=True, to_sql=True)
     # create_MESSSENGER_summary()
