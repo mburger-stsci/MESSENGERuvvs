@@ -19,4 +19,5 @@ dependencies = [
     "plotly (>=5.24.1)",
     "spiceypy (>=6.0.0)",
     "sqlalchemy>=2.0.44",
+    "dash (>=3.2.0,<4.0.0)",
 ]

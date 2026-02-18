@@ -6,13 +6,13 @@ import spiceypy as spice
 import dash
 import plotly.io as pio
 import plotly.graph_objects as go
-from nexoclom import SSObject
+from nexoclom2 import SSObject
 
 
-spice.furnsh('kernels/messenger_kernels.txt')
 
 class MESSENGERview:
     def __init__(self, data, layer='solar'):
+        spice.furnsh('kernels/messenger_kernels.txt')
         self.mdata = data
         self.mdata.set_frame('MSO')
         self.layer = layer
@@ -78,7 +78,6 @@ class MESSENGERview:
                                        'specular': 0})
         
         self.mercury_figure.add_trace(mercury)
-        
         
     def orientation_arrows(self):
         sundir = go.Scatter3d(name='SunDir', x=[0, 4], y=[0, 0], z=[0, 0],
@@ -172,7 +171,7 @@ class MESSENGERview:
         pio.templates.default = 'plotly_white'
     
         self.mercury_figure = go.Figure(layout={'height': 1000,
-                                        'width': 1000})
+                                                'width': 1000})
         
         # Add Mercury sphere
         self.create_mercury_globe(self.layer)
