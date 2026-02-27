@@ -1,5 +1,8 @@
+from MESSENGERuvvs import __path__
+path = __path__[0]
 from MESSENGERuvvs.MESSENGERdata import MESSENGERdata
 from MESSENGERuvvs.MESSENGERviewer import MESSENGERviewer
+from MESSENGERuvvs.MESSENGERmodel import MESSENGERModel
 
 
 name = 'MESSENGERuvvs'

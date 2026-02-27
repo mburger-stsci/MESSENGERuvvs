@@ -1,41 +1,51 @@
+import os
 import numpy as np
 import pandas as pd
 import pickle
-import PIL
+from PIL import Image
 import spiceypy as spice
 import dash
 import plotly.io as pio
 import plotly.graph_objects as go
 from nexoclom2 import SSObject
-
+from nexoclom2.solarsystem.load_kernels import SpiceKernels
+from MESSENGERuvvs import path
 
 
 class MESSENGERview:
     def __init__(self, data, layer='solar'):
-        spice.furnsh('kernels/messenger_kernels.txt')
         self.mdata = data
-        self.mdata.set_frame('MSO')
         self.layer = layer
 
         # Create a blank figure
         self.create_figure()
         self.app = self.create_app()
         
-    def create_mercury_globe(self, layer):
+    def create_mercury_globe(self):
         # Draw a sphere
         longitude_ = np.linspace(0, 2 * np.pi, 73)
         latitude_ = np.linspace(-np.pi / 2, np.pi / 2, 37)
         longitude, latitude = np.meshgrid(longitude_, latitude_)
+        
+        longitude = longitude
+        latitude = latitude
         loctime = (longitude * 12 / np.pi + 12) % 24
         ptsx = np.cos(longitude) * np.cos(latitude)
         ptsy = np.sin(longitude) * np.cos(latitude)
         ptsz = np.sin(latitude)
-        if layer == 'solar':
+        if self.layer == 'solar':
             # Solar shading of surface
             ptsc = np.copy(ptsx)
             ptsc[ptsc < 0] = 0
-        elif layer == 'abundance':
+            in_color = False
+        elif self.layer == 'abundance':
             # Source map on surface
+            from inspect import currentframe, getframeinfo
+            frameinfo = getframeinfo(currentframe())
+            print(frameinfo.filename, frameinfo.lineno)
+            from IPython import embed; embed()
+            import sys; sys.exit()
+            
             sourcemap = pickle.load(open('sourcemap.pkl', 'rb'))
             longitude, latitude = np.meshgrid(sourcemap['longitude'].value,
                                               sourcemap['latitude'].value)
@@ -43,39 +53,47 @@ class MESSENGERview:
             ptsc[:-1, :-1] = sourcemap['abundance'].T
             ptsc[:, -1] = ptsc[:, 0]
             ptsc[-1, :] = ptsc[0, :]
-        elif layer == 'map':
+            in_color = True
+        elif self.layer == 'map':
             # Load in Mercury's surface map
-            assert 0
-            mercmap = np.array(PIL.Image.open('MercuryMap.tiff'))
+            mapfile = os.path.join(path, 'data', 'MercurySurface.jpg')
+            mercmap = np.array(Image.open(mapfile))
+            
             indx = np.interp(latitude.flatten(),
-                             np.linspace(-np.pi / 2, np.pi / 2, num=mercmap.shape[0], endpoint=False),
+                             np.linspace(-np.pi/2, np.pi/2, num=mercmap.shape[0],
+                                         endpoint=False),
                              np.arange(mercmap.shape[0]))
             indy = np.interp(longitude.flatten(),
-                             np.linspace(0, 2 * np.pi, num=mercmap.shape[1], endpoint=False),
+                             np.linspace(0, 2*np.pi, num=mercmap.shape[1],
+                                         endpoint=False),
                              np.arange(mercmap.shape[1]))
-            ptsc = mercmap[indx.astype(int), indy.astype(int), :]
+            ptsc = mercmap[indx.astype(int), indy.astype(int), :].reshape(
+                (*longitude.shape, 3))
+            in_color = True
         else:
             assert 0, 'Not set up'
 
         # Mercury sphere
         customdata = np.array([loctime,
-                               longitude*180/np.pi,
-                               latitude*180/np.pi,
-                               ptsc]).T
-        hovertemp = (#'x, y, z: %{x:.1f}, %{y:.1f}, %{z:.1f} <br>'
-            'Local Time: %{customdata[0]:.1f} hr <br>'
-            'Longitude: %{customdata[1]:.1f}°<br>'
-            'Latitude: %{customdata[2]:.1f}°')
+                               np.degrees(longitude),
+                               np.degrees(latitude)])
+        hovertemp = ('Local Time: %{customdata[0]:.1f} hr <br>'
+                     'Longitude: %{customdata[1]:.1f}°<br>'
+                     'Latitude: %{customdata[2]:.1f}°')
         mercury = go.Surface(name='Mercury',
                              x=ptsx, y=ptsy, z=ptsz,
-                             surfacecolor=ptsc*256/ptsc.max(),
-                             colorscale='Greys',
                              customdata=customdata,
                              hovertemplate=hovertemp,
                              showscale=False, reversescale=True,
                              lighting={'diffuse': 1,
                                        'ambient': 1,
                                        'specular': 0})
+        
+        if in_color:
+            mercury.update(surfacecolor=ptsc)
+        else:
+            mercury.update(colorscale='Greys',
+                           surfacecolor=ptsc*256/ptsc.max())
         
         self.mercury_figure.add_trace(mercury)
         
@@ -98,10 +116,10 @@ class MESSENGERview:
         self.mercury_figure.add_trace(northdir)
 
     def messenger_orbit(self):
-        customdata = np.array([self.mdata.data.radiance,
-                               self.mdata.data.alttan,
-                               self.mdata.data.loctimetan,
-                               self.mdata.data.lattan * 180 / np.pi]).T
+        customdata = np.array([self.mdata.radiance,
+                               self.mdata.alttan,
+                               self.mdata.loctimetan,
+                               self.mdata.lattan * 180 / np.pi]).T
         hovertemp = ('S/C x, y, z: %{x:.1f}, %{y:.1f}, %{z:.1f} <br>'
                      'Radiance: %{customdata[0]:.1f} kR<br>'
                      'Tangent Altitude: %{customdata[1]:.1f} km<br>'
@@ -109,10 +127,12 @@ class MESSENGERview:
                      'Tangent Latitude: %{customdata[3]:.1f}°')
         
         # Plot the orbit in black
-        times = pd.date_range(self.mdata.data.utc.min(),
-                              self.mdata.data.utc.max(), freq='2min')
+        times = pd.date_range(self.mdata.utc.min().iso,
+                              self.mdata.utc.max().iso, freq='2min')
+        kernels = SpiceKernels('Mercury')
+        
         ets = [spice.str2et(t.isoformat()) for t in times]
-        mes_pos, _ = spice.spkpos('MESSENGER', ets, 'MSGR_MSO', 'NONE', 'Mercury')
+        mes_pos, _ = spice.spkpos('MESSENGER', ets, 'MercurySolar', 'NONE', 'Mercury')
         
         mercury = SSObject('Mercury')
         mes_pos /= mercury.radius.value
@@ -123,12 +143,10 @@ class MESSENGERview:
                                    'width': 3})
                                  # marker={'color':'black',
                                  #         'size': 5})
-        # orbit = go.Scatter3d(name='Orbit', x=self.mdata.data.x, y=self.mdata.data.y,
-        #                          z=self.mdata.data.z, mode='markers',
-        #                          marker={'size':3, 'color':'black'},
-        #                          customdata=customdata, hovertemplate=hovertemp)
         self.mercury_figure.add_trace(orbit)
         self.mercury_figure.update_layout(showlegend=False)
+        
+        kernels.unload()
      
     def add_lines_of_sight(self):
         # Add lines to tangent point
@@ -174,7 +192,7 @@ class MESSENGERview:
                                                 'width': 1000})
         
         # Add Mercury sphere
-        self.create_mercury_globe(self.layer)
+        self.create_mercury_globe()
         self.orientation_arrows()
         self.messenger_orbit()
         self.add_lines_of_sight()
@@ -197,7 +215,7 @@ class MESSENGERview:
     def create_app(self):
         title_info = f'''
 # MESSENGER UVVS
-### {self.mdata.species}, {self.mdata.query}
+### {self.mdata.species}, {self.mdata.comparisons}
 '''
         app = dash.Dash(f'MESSENGER UVVS Orbit Viewer',
                         external_stylesheets = ['https://codepen.io/chriddyp/pen/bWLwgP.css'])
