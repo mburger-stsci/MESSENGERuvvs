@@ -222,7 +222,7 @@ class MESSENGERdata:
                 # data.loc[data.alttan < 0, 'alttan'] = 1e10
                 self.data = data
                 unit = SSObject('Mercury').unit
-                self.utc = np.array([Time(time) for time in data.UTC])
+                self.utc = Time(np.array([time for time in data.UTC]))
                 self.taa = (np.median(data.TAA)*u.rad).to(u.deg)
                 self.x = data.x.values*unit
                 self.y = data.y.values*unit
@@ -526,13 +526,13 @@ class MESSENGERdata:
         else:
             print('Valid output formats = csv, pkl, html, tex')
             
-    def view_data(self, savefile=None, run_server=True):
-        viewer = MESSENGERview(self)
+    def view_data(self, savefile=None, run_server=True, layer='Solar'):
+        viewer = MESSENGERview(self, layer=layer)
         if savefile is not None:
             viewer.mercury_figure.write_html(savefile)
         else:
             pass
         if run_server:
-            viewer.app.run_server()
+            viewer.app.run()
         else:
             pass
