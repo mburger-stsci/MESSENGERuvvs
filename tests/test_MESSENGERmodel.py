@@ -5,6 +5,7 @@ import astropy.units as u
 from nexoclom2 import Input, Output, path, SSObject
 from MESSENGERuvvs import MESSENGERdata, MESSENGERModel
 from astropy.visualization import quantity_support
+from astropy.time import Time
 quantity_support()
 
 
@@ -19,26 +20,25 @@ inputs.options.species = data.species
 
 output = Output(inputs, 100000, overwrite=False)
 
-from inspect import currentframe, getframeinfo
-frameinfo = getframeinfo(currentframe())
-print(frameinfo.filename, frameinfo.lineno)
-from IPython import embed; embed()
-import sys; sys.exit()
-
-final = output.final_state()
+t0 = Time.now()
 model = MESSENGERModel(data, output)
+t1 = Time.now()
+print((t1-t0).to(u.s))
+
 
 plt.scatter(data.utc.to_datetime(), data.radiance, color='black')
 plt.plot(data.utc.to_datetime(), model.radiance, color='red')
 plt.pause(1)
 
-fig, ax = plt.subplots(figsize=(10, 10))
-ax.set_aspect('equal')
-ax.scatter(final.x, final.y, s=1)
-ax.plot(data.x, data.y, color='black')
-for i in range(0, len(data), 10):
-    ax.plot([data.x[i].value, data.x[i].value+10*data.xbore[i]],
-            [data.y[i].value, data.y[i].value+10*data.ybore[i]], color='blue')
+
+from shapely import Polygon
+
+# far_pt = (data.x[0]
+# cone = Polygon([(data.x[0], data.y[0], data.z[0]),
+
+
+final = output.final_state(which=range(0, 10000))
+
 
 from inspect import currentframe, getframeinfo
 frameinfo = getframeinfo(currentframe())
