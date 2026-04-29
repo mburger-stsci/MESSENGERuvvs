@@ -216,6 +216,7 @@ class MESSENGERdata:
                                  'Problem with comparisons given.')
             
             if len(data) > 0:
+                data.rename(columns={'TAA': 'taa'}, inplace=True)
                 self.frame = data.iloc[0].frame
                 data.drop(['species', 'frame'], inplace=True, axis=1)
                 data.set_index('index', inplace=True)
@@ -223,7 +224,7 @@ class MESSENGERdata:
                 self.data = data
                 unit = SSObject('Mercury').unit
                 self.utc = Time(np.array([time for time in data.UTC]))
-                self.taa = (np.median(data.TAA)*u.rad).to(u.deg)
+                self.taa = (data.taa.values*u.rad).to(u.deg)
                 self.x = data.x.values*unit
                 self.y = data.y.values*unit
                 self.z = data.z.values*unit
@@ -234,10 +235,10 @@ class MESSENGERdata:
                 self.xbore = data.xbore.values
                 self.ybore = data.ybore.values
                 self.zbore = data.zbore.values
-                self.xtan = data.xtan.values*u.s
-                self.ytan = data.ytan.values*u.s
-                self.ztan = data.ztan.values*u.s
-                self.rtan = data.rtan.values*u.s
+                self.xtan = data.xtan.values*unit
+                self.ytan = data.ytan.values*unit
+                self.ztan = data.ztan.values*unit
+                self.rtan = data.rtan.values*unit
                 self.alttan = data.alttan.values*u.km
                 self.longtan = (data.longtan.values*u.rad).to(u.deg)
                 self.lattan = (data.lattan.values*u.rad).to(u.deg)
@@ -254,6 +255,7 @@ class MESSENGERdata:
                 else:
                     pass
             else:
+                self.data = None
                 print(query)
                 print('No data found')
     
@@ -269,12 +271,15 @@ class MESSENGERdata:
         return result
     
     def __len__(self):
-        return len(self.data)
+        if self.data is None:
+            return 0
+        else:
+            return len(self.data)
     
     def __getitem__(self, q_):
         if isinstance(q_, int):
             q = slice(q_, q_ + 1)
-        elif isinstance(q_, slice):
+        elif isinstance(q_, slice) or isinstance(q_, np.ndarray):
             q = q_
         elif isinstance(q_, pd.Series):
             q = np.where(q_)[0]
@@ -283,10 +288,9 @@ class MESSENGERdata:
         
         new = copy.deepcopy(self)
         new.comparisons = self.comparisons + ' [Subset]'
-        new.taa = self.taa
         new.data = self.data.iloc[q].copy()
         new.utc = self.utc[q]
-        new.taa = np.median(new.data.TAA)*u.rad
+        new.taa = self.taa[q]
         new.x = self.x[q]
         new.y = self.y[q]
         new.z = self.z[q]
@@ -526,7 +530,7 @@ class MESSENGERdata:
         else:
             print('Valid output formats = csv, pkl, html, tex')
             
-    def view_data(self, savefile=None, run_server=True, layer='Solar'):
+    def view_data(self, savefile=None, run_server=True, layer='solar'):
         viewer = MESSENGERview(self, layer=layer)
         if savefile is not None:
             viewer.mercury_figure.write_html(savefile)

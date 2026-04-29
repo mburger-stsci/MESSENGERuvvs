@@ -33,12 +33,12 @@ class MESSENGERview:
         ptsx = np.cos(longitude) * np.cos(latitude)
         ptsy = np.sin(longitude) * np.cos(latitude)
         ptsz = np.sin(latitude)
-        if self.layer == 'solar':
+        if self.layer.lower() == 'solar':
             # Solar shading of surface
             ptsc = np.copy(ptsx)
             ptsc[ptsc < 0] = 0
             in_color = False
-        elif self.layer == 'abundance':
+        elif self.layer.lower() == 'abundance':
             # Source map on surface
             from inspect import currentframe, getframeinfo
             frameinfo = getframeinfo(currentframe())
@@ -71,6 +71,7 @@ class MESSENGERview:
                 (*longitude.shape, 3))
             in_color = True
         else:
+            print(self.layer)
             assert 0, 'Not set up'
 
         # Mercury sphere
@@ -132,7 +133,8 @@ class MESSENGERview:
         kernels = SpiceKernels('Mercury')
         
         ets = [spice.str2et(t.isoformat()) for t in times]
-        mes_pos, _ = spice.spkpos('MESSENGER', ets, 'MercurySolar', 'NONE', 'Mercury')
+        mes_pos, _ = spice.spkpos('MESSENGER', ets, 'MercurySolar', 'NONE',
+                                  'Mercury')
         
         mercury = SSObject('Mercury')
         mes_pos /= mercury.radius.value

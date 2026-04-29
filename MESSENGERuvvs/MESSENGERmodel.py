@@ -1,7 +1,8 @@
 import numpy as np
 from sklearn.neighbors import KDTree
-from astropy.time import Time
 import astropy.units as u
+from astropy.modeling import models, fitting
+from astropy.visualization import PercentileInterval
 from nexoclom2.data_simulation.ModelResult import ModelResult
 
 
@@ -57,8 +58,12 @@ class MESSENGERModel(ModelResult):
         self.column = np.zeros(len(scdata))/u.cm**2
         self.packets = np.zeros(len(scdata), dtype=int)
         self.compute_radiance(scdata, output)
+        fitfactor, goodness = self.determine_source_rate(scdata)
+        self.radiance *= fitfactor
+        self.sourcerate = fitfactor * output.sourcerate
+        self.goodness_of_fit = goodness
         
-    def compute_radiance(self, data, output, chunksize=20_000_000):
+    def compute_radiance(self, data, output, chunksize=1_000_000):
         mercury = output.objects['Mercury']
         dist_from_plan = np.sqrt(data.x**2 + data.y**2 + data.z**2)
         
@@ -82,50 +87,83 @@ class MESSENGERModel(ModelResult):
         t_edge = (-b + np.sqrt(b**2-4*a*c))/(2*a)
         
         print('Loading final state')
-        allpackets = output.final_state()
+        
+        it, ct = 0, 0
+        nchunks = int(output.n_final_packets/chunksize)+1
         print('Determining radiance')
         
-        tree = KDTree(allpackets.X())
-        for i in range(len(data)):
-            # Find points along line of sight
-            xyz, bore = sc_xyz[i,:], sc_bore[i,:]
+        while ct < output.n_final_packets:
+            print(f'Chunk {it+1} of {nchunks}')
+            ind = np.arange(ct, ct+chunksize).astype(int)
+            ind = ind[ind < output.n_final_packets]
             
-            t = np.linspace(0, t_edge[i], 100)*mercury.unit
-            pts_los = (xyz[np.newaxis,:] + np.outer(t, bore))
-            width = 2*t*np.sin(self.dphi)
-            inds = np.unique(np.concatenate(tree.query_radius(pts_los, width)))
-            packets = allpackets[inds]
-            
-            # angle between points and s/c boresight
-            x_rel_sc = packets.X() - sc_xyz[i,:]
-            r_rel_sc = np.sqrt(np.sum(x_rel_sc**2, axis=1))
-            cos_theta = np.sum(x_rel_sc*sc_bore[i,:], axis=1)/r_rel_sc
-            
-            # Determine the projection of the packet onto the LOS in view of s/c
-            in_view = ((cos_theta > np.cos(self.dphi)) &
-                       (r_rel_sc*cos_theta < dist_from_plan[i]))
-            
-            if np.any(in_view):
-                # distance from s/c along los
-                los_r = r_rel_sc[in_view]*cos_theta[in_view]
+            allpackets = output.final_state(which=ind)
+            tree = KDTree(allpackets.X())
+            for i in range(len(data)):
+                # Find points along line of sight
+                xyz, bore = sc_xyz[i,:], sc_bore[i,:]
                 
-                # locations of packets projected onto los rel Mercury
-                los_xyz = sc_xyz[i,:] + los_r[:,np.newaxis]*sc_bore[i,:]
-                sub = packets[in_view]
-                sub.x = los_xyz[:,0]
-                sub.y = los_xyz[:,1]
-                sub.z = los_xyz[:,2]
-                sub.X = sub.X()
-                sub.V = sub.V()
-                rad_per_atom = self.radiance_per_atom(sub, output)
+                t = np.linspace(0, t_edge[i], 100)*mercury.unit
+                pts_los = (xyz[np.newaxis,:] + np.outer(t, bore))
+                width = 2*t*np.sin(self.dphi)
+                inds = np.unique(np.concatenate(tree.query_radius(pts_los, width)))
+                packets = allpackets[inds]
                 
-                # compute column density
-                area_pix = np.pi * (r_rel_sc[in_view]*np.sin(self.dphi))**2
-                col = sub.frac * output.atoms_per_packet/area_pix
-                self.column[i] += col.sum()
-                self.radiance[i] += np.sum(col*rad_per_atom)
-                self.packets[i] += in_view.sum()
-            else:
-                pass
+                # angle between points and s/c boresight
+                x_rel_sc = packets.X() - sc_xyz[i,:]
+                r_rel_sc = np.sqrt(np.sum(x_rel_sc**2, axis=1))
+                cos_theta = np.sum(x_rel_sc*sc_bore[i,:], axis=1)/r_rel_sc
+                
+                # Determine the projection of the packet onto the LOS in view of s/c
+                in_view = ((cos_theta > np.cos(self.dphi)) &
+                           (r_rel_sc*cos_theta < dist_from_plan[i]))
+                
+                if np.any(in_view):
+                    # distance from s/c along los
+                    los_r = r_rel_sc[in_view]*cos_theta[in_view]
+                    
+                    # locations of packets projected onto los rel Mercury
+                    los_xyz = sc_xyz[i,:] + los_r[:,np.newaxis]*sc_bore[i,:]
+                    sub = packets[in_view]
+                    sub.x = los_xyz[:,0]
+                    sub.y = los_xyz[:,1]
+                    sub.z = los_xyz[:,2]
+                    sub.X = sub.X()
+                    sub.V = sub.V()
+                    rad_per_atom = self.radiance_per_atom(sub, output)
+                    
+                    # compute column density
+                    area_pix = np.pi * (r_rel_sc[in_view]*np.sin(self.dphi))**2
+                    col = sub.frac * output.atoms_per_packet/area_pix
+                    self.column[i] += col.sum()
+                    self.radiance[i] += np.sum(col*rad_per_atom)
+                    self.packets[i] += in_view.sum()
+                else:
+                    pass
             
-        del packets
+                del packets
+            ct += chunksize
+            it += 1
+            del allpackets
+    
+    def make_mask(self, scdata):
+        mask = np.array([True for _ in scdata.radiance])
+        return mask
+
+    def determine_source_rate(self, scdata, use_weights=True):
+        mask = self.make_mask(scdata)
+        if use_weights:
+            weights = 1./scdata.data.sigma.values[mask]**2
+        else:
+            weights = np.ones_like(scdata.sigma[mask])
+            
+        linmodel = models.Multiply()
+        fitter = fitting.LinearLSQFitter()
+        if not np.all(self.radiance == 0*u.kR):
+            best_fit = fitter(linmodel, self.radiance[mask],
+                              scdata.radiance[mask],
+                              weights=weights)
+            
+            return best_fit.factor.value, None
+        else:
+            return 0, None
