@@ -47,7 +47,6 @@ class MESSENGERModel(ModelResult):
             params['quantity'] = 'radiance'
         super().__init__(output, params)
         
-        assert output.frame == 'MERCURYSOLAR', 'output.frame must be MERCURYSOLAR'
         assert output.species == scdata.species, 'output.species =/= scdata.species'
         
         self.species = scdata.species
@@ -70,7 +69,6 @@ class MESSENGERModel(ModelResult):
         # Angle between look direction and planet
         ang = np.arccos((-data.x*data.xbore - data.y*data.ybore -
                          data.z*data.zbore)/dist_from_plan)
-        
         asize_plan = np.arcsin(1*mercury.unit/dist_from_plan)
         
         # If LOS doesn't hit planet, integrate to infinity
@@ -98,6 +96,8 @@ class MESSENGERModel(ModelResult):
             ind = ind[ind < output.n_final_packets]
             
             allpackets = output.final_state(which=ind)
+            assert (allpackets.frame == 'MERCURYSOLAR',
+                    'final.frame must be MERCURYSOLAR')
             tree = KDTree(allpackets.X())
             for i in range(len(data)):
                 # Find points along line of sight
@@ -150,8 +150,11 @@ class MESSENGERModel(ModelResult):
         mask = np.array([True for _ in scdata.radiance])
         return mask
 
-    def determine_source_rate(self, scdata, use_weights=True):
-        mask = self.make_mask(scdata)
+    def determine_source_rate(self, scdata, use_weights=True, mask=None):
+        if mask is None:
+            mask = self.make_mask(scdata)
+        else:
+            pass
         if use_weights:
             weights = 1./scdata.data.sigma.values[mask]**2
         else:
