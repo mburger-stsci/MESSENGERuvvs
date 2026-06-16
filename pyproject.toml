@@ -1,6 +1,6 @@
 [project]
 name = "messengeruvvs"
-version = "0.1.0"
+version = "1.0.0"
 description = "Routines for working with MESSENGER UVVS data"
 readme = "README.md"
 authors = [
