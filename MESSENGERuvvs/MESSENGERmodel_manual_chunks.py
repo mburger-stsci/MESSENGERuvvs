@@ -3,35 +3,7 @@ from sklearn.neighbors import KDTree
 import astropy.units as u
 from astropy.modeling import models, fitting
 from astropy.visualization import PercentileInterval
-from astropy.time import Time
-import h5py
 from nexoclom2.data_simulation.ModelResult import ModelResult
-
-
-class MMPacket:
-    def __init__(self):
-        # self.x = None
-        # self.y = None
-        # self.z = None
-        self.time = None
-        self.X = None
-        self.vx = None
-        self.vy = None
-        self.vz = None
-        self.frac = None
-        
-    def __getitem__(self, q):
-        if self.time is not None:
-            new = MMPacket()
-            new.time = self.time[q]
-            new.X = self.X[q]
-            new.vx = self.vx[q]
-            new.vy = self.vy[q]
-            new.vz = self.vz[q]
-            new.frac = self.frac[q]
-            return new
-        else:
-            return None
 
 
 class MESSENGERModel(ModelResult):
@@ -112,28 +84,21 @@ class MESSENGERModel(ModelResult):
         c = np.sum(sc_xyz**2, axis=1) - output.inputs.options.outer_edge**2
         t_edge = (-b + np.sqrt(b**2-4*a*c))/(2*a)
         
+        print('Loading final state')
+        
+        it, ct = 0, 0
+        nchunks = int(output.n_final_packets/chunksize)+1
         print('Determining radiance')
-        with h5py.File(output.savefile) as store:
-            final_state = store['final_state']
+        
+        while ct < output.n_final_packets:
+            print(f'Chunk {it+1} of {nchunks}')
+            ind = np.arange(ct, ct+chunksize).astype(int)
+            ind = ind[ind < output.n_final_packets]
             
-            t0 = Time.now()
-            packets = MMPacket()
-            packets.time = final_state['time'][:]*u.s
-            packets.X = np.column_stack([final_state['x'][:],
-                                         final_state['y'][:],
-                                         final_state['z'][:]])*output.unit
-            packets.vx = final_state['vx'][:]*output.unit/u.s
-            packets.vy = final_state['vy'][:]*output.unit/u.s
-            packets.vz = final_state['vz'][:]*output.unit/u.s
-            packets.frac = final_state['frac'][:]
-            # frac = final_state['frac'][:]
-            # vx = final_state['vx'][:]*output.unit/u.s
-            # vy = final_state['vy'][:]*output.unit/u.s
-            # vz = final_state['vz'][:]*output.unit/u.s
-            tree = KDTree(packets.X)
-            t1 = Time.now()
-            print((t1-t0).to(u.s))
-            
+            allpackets = output.final_state(which=ind)
+            assert (allpackets.frame == 'MERCURYSOLAR',
+                    'final.frame must be MERCURYSOLAR')
+            tree = KDTree(allpackets.X())
             for i in range(len(data)):
                 # Find points along line of sight
                 xyz, bore = sc_xyz[i,:], sc_bore[i,:]
@@ -142,19 +107,10 @@ class MESSENGERModel(ModelResult):
                 pts_los = (xyz[np.newaxis,:] + np.outer(t, bore))
                 width = 2*t*np.sin(self.dphi)
                 inds = np.unique(np.concatenate(tree.query_radius(pts_los, width)))
-                packets_inds = packets[inds]
-                # packets = allpackets[inds]
-                # t = final_state['time'][inds]*u.s
-                # x = final_state['x'][inds]*output.unit
-                # y = final_state['y'][inds]*output.unit
-                # z = final_state['z'][inds]*output.unit
-                # frac = final_state['frac'][inds]
-                # vx = final_state['vx'][inds]*output.unit/u.s
-                # vy = final_state['vy'][inds]*output.unit/u.s
-                # vz = final_state['vz'][inds]*output.unit/u.s
+                packets = allpackets[inds]
                 
                 # angle between points and s/c boresight
-                x_rel_sc = packets.X[inds,:] - sc_xyz[i,:]
+                x_rel_sc = packets.X() - sc_xyz[i,:]
                 r_rel_sc = np.sqrt(np.sum(x_rel_sc**2, axis=1))
                 cos_theta = np.sum(x_rel_sc*sc_bore[i,:], axis=1)/r_rel_sc
                 
@@ -168,29 +124,28 @@ class MESSENGERModel(ModelResult):
                     
                     # locations of packets projected onto los rel Mercury
                     los_xyz = sc_xyz[i,:] + los_r[:,np.newaxis]*sc_bore[i,:]
-                    sub = packets_inds[in_view]
-                    # sub = MMPacket()
-                    # sub.time = t[in_view]
-                    # sub.x = los_xyz[:,0]
-                    # sub.y = los_xyz[:,1]
-                    # sub.z = los_xyz[:,2]
-                    # sub.X = np.column_stack([sub.x, sub.y, sub.z])
-                    # sub.vx = vx[in_view]
-                    # sub.vy = vx[in_view]
-                    # sub.vz = vx[in_view]
-                    # sub.frac = frac[in_view]
+                    sub = packets[in_view]
+                    sub.x = los_xyz[:,0]
+                    sub.y = los_xyz[:,1]
+                    sub.z = los_xyz[:,2]
+                    sub.X = sub.X()
+                    sub.V = sub.V()
+                    rad_per_atom = self.radiance_per_atom(sub, output)
                     
                     # compute column density
-                    rad_per_atom = self.radiance_per_atom(sub, output)
                     area_pix = np.pi * (r_rel_sc[in_view]*np.sin(self.dphi))**2
-                    col = sub.frac * output.atoms_per_packet/area_pix.to(u.cm**2)
+                    col = sub.frac * output.atoms_per_packet/area_pix
                     self.column[i] += col.sum()
                     self.radiance[i] += np.sum(col*rad_per_atom)
                     self.packets[i] += in_view.sum()
                 else:
                     pass
-                
             
+                del packets
+            ct += chunksize
+            it += 1
+            del allpackets
+    
     def make_mask(self, scdata):
         mask = np.array([True for _ in scdata.radiance])
         return mask
