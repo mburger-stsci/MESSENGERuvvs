@@ -77,6 +77,7 @@ class MESSENGERModel(ModelResult):
         
         assert output.species == scdata.species, 'output.species =/= scdata.species'
         
+        self.inputs = output.inputs
         self.species = scdata.species
         self.query = scdata.comparisons
         self.type = 'LineOfSight'
