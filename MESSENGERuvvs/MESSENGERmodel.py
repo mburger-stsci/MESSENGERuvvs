@@ -132,8 +132,6 @@ class MESSENGERModel(ModelResult):
             # vy = final_state['vy'][:]*output.unit/u.s
             # vz = final_state['vz'][:]*output.unit/u.s
             tree = KDTree(packets.X)
-            t1 = Time.now()
-            print((t1-t0).to(u.s))
             
             for i in range(len(data)):
                 # Find points along line of sight
@@ -162,7 +160,7 @@ class MESSENGERModel(ModelResult):
                 # Determine the projection of the packet onto the LOS in view of s/c
                 in_view = ((cos_theta > np.cos(self.dphi)) &
                            (r_rel_sc*cos_theta < dist_from_plan[i]))
-                
+                print(sum(in_view))
                 if np.any(in_view):
                     # distance from s/c along los
                     los_r = r_rel_sc[in_view]*cos_theta[in_view]
@@ -190,7 +188,9 @@ class MESSENGERModel(ModelResult):
                     self.packets[i] += in_view.sum()
                 else:
                     pass
-                
+            
+            t1 = Time.now()
+            print((t1-t0).to(u.s))
             
     def make_mask(self, scdata):
         mask = np.array([True for _ in scdata.radiance])
