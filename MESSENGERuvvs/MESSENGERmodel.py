@@ -160,7 +160,6 @@ class MESSENGERModel(ModelResult):
                 # Determine the projection of the packet onto the LOS in view of s/c
                 in_view = ((cos_theta > np.cos(self.dphi)) &
                            (r_rel_sc*cos_theta < dist_from_plan[i]))
-                print(sum(in_view))
                 if np.any(in_view):
                     # distance from s/c along los
                     los_r = r_rel_sc[in_view]*cos_theta[in_view]
