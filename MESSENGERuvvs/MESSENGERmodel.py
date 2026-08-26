@@ -119,7 +119,9 @@ class MESSENGERModel(ModelResult):
             
             t0 = Time.now()
             ct, npack = 0, final_state['time'].shape[0]
+            it = 0
             while ct < npack:
+                print(f'model iteration {it}')
                 packets = MMPacket()
                 end = np.min([npack, ct+npack])
                 packets.time = final_state['time'][ct:end]*u.s
@@ -132,6 +134,7 @@ class MESSENGERModel(ModelResult):
                 packets.frac = final_state['frac'][ct:end]
                 tree = KDTree(packets.X)
                 ct = end
+                it += 1
                 
                 for i in range(len(data)):
                     # Find points along line of sight

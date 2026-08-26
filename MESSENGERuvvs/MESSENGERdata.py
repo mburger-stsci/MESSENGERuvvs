@@ -10,6 +10,7 @@ from nexoclom2 import SSObject
 from MESSENGERuvvs.plot_methods import plot_bokeh, plot_plotly
 from MESSENGERuvvs.MESSENGERview import MESSENGERview
 from MESSENGERuvvs.get_datapath import get_datapath
+from MESSENGERuvvs import path
 
 
 class InputError(Exception):
@@ -244,6 +245,15 @@ class MESSENGERdata:
                 self.lattan = (data.lattan.values*u.rad).to(u.deg)
                 self.loctimetan = data.loctimetan.values*u.hr
                 
+                # Add in merc_year
+                orbit_data = pd.read_pickle(os.path.join(path, 'data',
+                                                         'MESSENGER.orbitdata.pkl'))
+                orbit_data = orbit_data['orbit_data']
+                orbits = orbit_data['orbit'][0]
+                years = orbit_data['merc_year'][0]
+                years = {int(orb):int(yr) for orb,yr in zip(orbits,years)}
+                self.merc_year = np.array([years[x] for x in self.orbit])
+                
                 if load_spectra:
                     specfile = os.path.join(datapath, 'Level2',
                                             f'MESSENGERuvvs{species}.pkl')
@@ -309,7 +319,7 @@ class MESSENGERdata:
         new.longtan = self.longtan[q]
         new.lattan = self.lattan[q]
         new.loctimetan = self.loctimetan[q]
-        
+        new.merc_year = self.merc_year[q]
         
         return new
     
