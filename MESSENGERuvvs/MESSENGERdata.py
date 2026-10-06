@@ -1,0 +1,437 @@
+"""MESSENGER UVVS data class"""
+import os
+import numpy as np
+import pandas as pd
+import copy
+from astropy import units as u
+from astropy.time import Time
+import sqlalchemy as sqla
+from nexoclom2 import SSObject
+from MESSENGERuvvs.plot_methods import plot_bokeh, plot_plotly
+from MESSENGERuvvs.MESSENGERview import MESSENGERview
+from MESSENGERuvvs.get_datapath import get_datapath
+from MESSENGERuvvs import path
+
+
+class InputError(Exception):
+    """Raised when a required parameter is not included."""
+    
+    def __init__(self, expression, message):
+        self.expression = expression
+        self.message = message
+
+
+class MESSENGERdata:
+    """Retrieve MESSENGER data from database.
+    Given a species and set of comparisons, retrieve MESSSENGER UVVS
+    data from the database. The list of searchable fields is given at
+    :doc:`database_fields`.
+
+    Returns a MESSENGERdata Object.
+
+    **Parameters**
+
+    species
+        Species to search. This is required because the data from each
+        species is stored in a different database table.
+
+    query
+        A SQL-style list of comparisons.
+
+    load_spectra
+        Load the individual spectra as well as the radiance data.
+        Default = False
+
+    The data in the object created is extracted from the database tables usingu
+    the query:
+
+    ::
+
+        SELECT *
+        FROM <species>uvvsdata, <species>pointing
+        WHERE <query>
+
+    See examples below.
+
+    **Class Atributes**
+
+    species
+        The object can only contain a single species.
+
+    frame
+        Coordinate frame for the data, either MSO or Model.
+
+    query
+        SQL query used to search the database and create the object.
+
+    data
+        Pandas dataframe containing result of SQL query. Columns in the
+        dataframe are the same as in the database except *frame* and
+        *species* have been dropped as they are redundant. If models have been
+        run, there are also columns in the form modelN for the Nth model run.
+
+    taa
+        Median true anomaly for the data in radians.
+
+    model_label
+        If *N* models have been run, this is a dictionary in the form
+        `{'model0':label0, ..., 'modelN':labelN}` containing descriptions for
+        the models.
+
+    model_strength
+        If *N* models have been run, this is a dictionary in the form
+        `{'model0':strength0, ..., 'modelN':strengthN}` containing modeled
+        source rates in units of :math:`10^{23}` atoms/s.
+
+    **Examples**
+
+    1. Loading data
+
+    ::
+
+        >>> from MESSENGERuvvs import MESSENGERdata
+
+        >>> CaData = MESSENGERdata('Ca', 'orbit = 36')
+
+        >>> print(CaData)
+        Species: Ca
+        Query: orbit = 36
+        Frame: MSO
+        Object contains 581 spectra.
+
+        >>> NaData = MESSENGERdata('Na', 'orbit > 100 and orbit < 110')
+
+        >>> print(NaData)
+        Species: Na
+        Query: orbit > 100 and orbit < 110
+        Frame: MSO
+        Object contains 3051 spectra.
+
+        >>> MgData = MESSENGERdata('Mg',
+                'loctimetan > 5.5 and loctimetan < 6.5 and alttan < 1000')
+
+        >>> print(len(MgData))
+        45766
+
+    2. Accessing data.
+
+    * The observations are stored within the MESSENGERdata object in a
+      `pandas <https://pandas.pydata.org>`_ dataframe attribute called *data*.
+      Please see the `pandas documentation <https://pandas.pydata.org>`_ for
+      more information on how to work with dataframes.
+
+    ::
+
+        >>> print(CaData.data.head(5))
+                                 utc  orbit  merc_year  ...  loctimetan         slit               utcstr
+        unum                                            ...
+        3329 2011-04-04 21:24:11.820     36          0  ...   14.661961  Atmospheric  2011-04-04T21:24:11
+        3330 2011-04-04 21:25:08.820     36          0  ...   12.952645  Atmospheric  2011-04-04T21:25:08
+        3331 2011-04-04 21:26:05.820     36          0  ...   12.015670  Atmospheric  2011-04-04T21:26:05
+        3332 2011-04-04 21:27:02.820     36          0  ...   12.007919  Atmospheric  2011-04-04T21:27:02
+        3333 2011-04-04 21:27:59.820     36          0  ...   12.008750  Atmospheric  2011-04-04T21:27:59
+
+        [5 rows x 29 columns]
+
+    * Individual observations can be extracted using standard Python
+      slicing techniques:
+
+    ::
+
+        >>> print(CaData[3:8])
+        Species: Ca
+        Query: orbit = 36
+        Frame: MSO
+        Object contains 5 spectra.
+
+        >>> print(CaData[3:8].data['taa'])
+        unum
+        3332    1.808107
+        3333    1.808152
+        3334    1.808198
+        3335    1.808243
+        3336    1.808290
+        Name: taa, dtype: float64
+
+    3. Modeling data
+
+    ::
+
+        >>> inputs = Input('Ca.spot.Maxwellian.input')
+        >>> CaData.simulate_data_from_inputs(inputs, 1e5, label='Model 1')
+        >>> inputs.speeddist.temperature /= 2.  # Run model with different temperature
+        >>> CaData.simulate_data_from_inputs(inputs, 1e5, label='Model 2')
+
+    4. Plotting data
+
+    ::
+
+        >>> CaData.plot('Ca.orbit36.models.html')
+
+    5. Exporting data to a file
+
+    ::
+
+        >>> CaData.export('modelresults.csv')
+        >>> CaData.export('modelresults.html', columns=['taa'])
+
+    """
+    
+    def __init__(self, species, comparisons=None, load_spectra=False):
+        allspecies = 'Na', 'Ca', 'Mg'
+        if species in allspecies:
+            self.species = species
+        else:
+            raise InputError('MESSENGERdata.__init__', f'{species} not valid.')
+        
+        self.frame = None
+        self.app = None  # Plotly app
+        self.model_result = {}
+        
+        datapath = get_datapath()
+        dbfile = os.path.join(datapath, 'Level2', f'MESSENGERuvvs{species}.sqlite')
+        engine = sqla.create_engine(f'sqlite:///{dbfile}')
+        metadata_obj = sqla.MetaData()
+        
+        data_table = sqla.Table('data', metadata_obj, autoload_with=engine)
+        
+        if comparisons is None:
+            # Return list of queryable fields
+            data_columns = [str(col).split('.')[1] for col in data_table.columns]
+            print('Available columns')
+            for col in data_columns:
+                print(f'\t{col}')
+        else:
+            # Run the query and try to make the object
+            self.comparisons = self._format_comparisons(comparisons)
+            query = sqla.text(
+                f'SELECT * from data WHERE {comparisons} ORDER BY UTC')
+            
+            try:
+                with engine.connect() as con:
+                    data = pd.read_sql(query, con)
+            except Exception:
+                print('Requested data:')
+                print(query)
+                raise InputError('MESSENGERdata.__init__',
+                                 'Problem with comparisons given.')
+            
+            if len(data) > 0:
+                data.rename(columns={'TAA': 'taa'}, inplace=True)
+                self.frame = data.iloc[0].frame
+                data.drop(['species', 'frame'], inplace=True, axis=1)
+                data.set_index('index', inplace=True)
+                
+                self.data = data
+                unit = SSObject('Mercury').unit
+                self.utc = Time(np.array(data.UTC.to_list()))
+                self.taa = data.taa.values*u.deg
+                self.x = data.x.values*unit
+                self.y = data.y.values*unit
+                self.z = data.z.values*unit
+                self.r = np.sqrt(data.x**2 + data.y**2 + data.z**2)
+                self.orbit = data.orbit.values
+                self.merc_year = data.year.values
+                self.radiance = data.radiance.values*u.kR
+                self.sigma = data.sigma.values*u.kR
+                self.xbore = data.xbore.values
+                self.ybore = data.ybore.values
+                self.zbore = data.zbore.values
+                self.xtan = data.xtan.values*unit
+                self.ytan = data.ytan.values*unit
+                self.ztan = data.ztan.values*unit
+                self.rtan = data.rtan.values*unit
+                self.alttan = data.alttan.values*u.km
+                self.minalt = data.minalt.values*u.km
+                self.rangetan = data.rangetan.values*unit
+                self.longtan = data.longtan.values*u.deg
+                self.lattan = data.lattan.values*u.deg
+                self.loctimetan = data.loctimetan.values*u.hr
+                self.subsolar_long = data.subslong.values*u.deg
+                self.subsolar_lat = data.subslat.values*u.deg
+                self.longtanIAU = data.longtanIAU.values*u.deg
+                self.lattanIAU = data.lattanIAU.values*u.deg
+                
+                if load_spectra:
+                    specfile = os.path.join(datapath, 'Level2',
+                                            f'MESSENGERuvvs{species}.pkl')
+                    spectra = pd.read_pickle(specfile)
+                    spectra = spectra[spectra.UTC.isin(self.data.UTC.values)]
+                    
+                    assert len(spectra) == len(self.data)
+                    self.data = self.data.merge(spectra, on='UTC')
+                else:
+                    pass
+            else:
+                self.data = None
+                print(query)
+                print('No data found')
+    
+    def __str__(self):
+        return self.__repr__()
+    
+    def __repr__(self):
+        result = ('MESSENGER UVVS Data Object\n'
+                  f'Species: {self.species}\n'
+                  f'Comparisons: {self.comparisons}\n'
+                  f'Frame: {self.frame}\n'
+                  f'Object contains {len(self)} spectra.')
+        return result
+    
+    def __len__(self):
+        if self.data is None:
+            return 0
+        else:
+            return len(self.data)
+    
+    def __getitem__(self, q_):
+        if isinstance(q_, int):
+            q = slice(q_, q_ + 1)
+        elif isinstance(q_, slice) or isinstance(q_, np.ndarray):
+            q = q_
+        elif isinstance(q_, pd.Series):
+            q = np.where(q_)[0]
+        else:
+            raise TypeError
+        
+        new = copy.deepcopy(self)
+        new.comparisons = self.comparisons + ' [Subset]'
+        new.data = new.data.iloc[q].copy()
+        new.utc = new.utc[q]
+        new.taa = new.taa[q]
+        new.x = new.x[q]
+        new.y = new.y[q]
+        new.z = new.z[q]
+        new.r = new.r[q]
+        new.orbit = new.orbit[q]
+        new.merc_year = new.merc_year[q]
+        new.radiance = new.radiance[q]
+        new.sigma = new.sigma[q]
+        new.xbore = new.xbore[q]
+        new.ybore = new.ybore[q]
+        new.zbore = new.zbore[q]
+        new.xtan = new.xtan[q]
+        new.ytan = new.ytan[q]
+        new.ztan = new.ztan[q]
+        new.rtan = new.rtan[q]
+        new.alttan = new.alttan[q]
+        new.minalt = new.minalt[q]
+        new.rangetan = new.rangetan[q]
+        new.longtan = new.longtan[q]
+        new.lattan = new.lattan[q]
+        new.loctimetan = new.loctimetan[q]
+        new.subsolar_long = new.subsolar_long[q]
+        new.subsolar_lat = new.subsolar_lat[q]
+        new.longtanIAU = new.longtanIAU[q]
+        new.lattanIAU = new.lattanIAU[q]
+        
+        return new
+    
+    def __iter__(self):
+        for i in range(len(self.data)):
+            yield self[i]
+    
+    def keys(self):
+        """Return all keys in the object, including dataframe columns"""
+        keys = list(self.__dict__.keys())
+        keys.extend([f'data.{col}' for col in self.data.columns])
+        return keys
+    
+    @staticmethod
+    def _format_comparisons(comparison):
+        """Try to impose some regularity on the query."""
+        query = comparison.lower()
+        
+        # Remove some extra spaces
+        chars = ['=', '>', '<', '!=', '>=', '<=']
+        for char in chars:
+            query = query.replace(f'{char} ', char)
+            query = query.replace(f' {char}', char)
+        
+        return query
+    
+    def plot(self, filename=None, plot_method='plotly', show=False,
+             savepng=False, title=None):
+        if plot_method == 'plotly':
+            app = plot_plotly(self, filename)
+            if show:
+                app.run_server(debug=False)
+            else:
+                pass
+            self.app = app
+        elif plot_method == 'bokeh':
+            plot_bokeh(self, filename, show, savepng=savepng, title=title)
+        else:
+            print('Not a valid plotting method')
+    
+    def export(self, filename, columns=('utc', 'radiance')):
+        r"""Export data and models to a file.
+        **Parameters**
+
+        filename
+            Filename to export model results to. The file extension determines
+            the format. Formats available: csv, pkl, html, tex
+
+        columns
+            Columns from the data dataframe to export. Available columns can
+            be found by calling the `keys()` method on the data object.
+            Default = ['utc', 'radiance'] and all model result columns. Note:
+            The default columns are always included in the output
+            regardless of whether they are specified.
+
+        **Returns**
+
+        No outputs.
+
+        """
+        columns_ = list(columns)
+        if len(self.model_result) != 0:
+            columns_.extend(self.model_result.keys())
+        else:
+            pass
+        
+        # Make sure radiance is in there
+        if 'radiance' not in columns_:
+            columns_.append('radiance')
+        else:
+            pass
+        
+        # Make sure UTC is in there
+        if 'utc' not in columns_:
+            columns_.append('utc')
+        else:
+            pass
+        
+        if len(columns_) != len(set(columns_)):
+            columns_ = list(set(columns_))
+        else:
+            pass
+        
+        for col in columns_:
+            if col not in self.data.columns:
+                columns_.remove(col)
+            else:
+                pass
+        
+        subset = self.data[columns_]
+        if filename.endswith('.csv'):
+            subset.to_csv(filename)
+        elif filename.endswith('.pkl'):
+            subset.to_pickle(filename)
+        elif filename.endswith('.html'):
+            subset.to_html(filename)
+        elif filename.endswith('.tex'):
+            subset.to_latex(filename)
+        else:
+            print('Valid output formats = csv, pkl, html, tex')
+            
+    def view_data(self, savefile=None, run_server=True, layer='solar'):
+        viewer = MESSENGERview(self, layer=layer)
+        if savefile is not None:
+            viewer.mercury_figure.write_html(savefile)
+        else:
+            pass
+        if run_server:
+            viewer.app.run()
+        else:
+            pass

@@ -1,0 +1,11 @@
+[project]
+name = "messengeruvvs"
+version = "1.0.0"
+description = "Routines for working with MESSENGER UVVS data"
+authors = [{ name = "Matthew Burger", email = "mburger@stsci.edu" }]
+requires-python = ">=3.13"
+readme = "README.md"
+dependencies = ["sqlalchemy>=2.0.44"]
+
+[tool.ruff.lint]
+ignore = ['I001']

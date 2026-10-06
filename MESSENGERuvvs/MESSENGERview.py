@@ -1,0 +1,229 @@
+import os
+import numpy as np
+import pandas as pd
+import pickle
+from PIL import Image
+import spiceypy as spice
+import dash
+import plotly.io as pio
+import plotly.graph_objects as go
+from nexoclom2 import SSObject
+from nexoclom2.solarsystem.load_kernels import SpiceKernels
+from MESSENGERuvvs import path
+
+
+class MESSENGERview:
+    def __init__(self, data, layer='solar'):
+        self.mdata = data
+        self.layer = layer
+
+        # Create a blank figure
+        self.create_figure()
+        self.app = self.create_app()
+        
+    def create_mercury_globe(self):
+        # Draw a sphere
+        longitude_ = np.linspace(0, 2 * np.pi, 73)
+        latitude_ = np.linspace(-np.pi / 2, np.pi / 2, 37)
+        longitude, latitude = np.meshgrid(longitude_, latitude_)
+        
+        longitude = longitude
+        latitude = latitude
+        loctime = (longitude * 12 / np.pi + 12) % 24
+        ptsx = np.cos(longitude) * np.cos(latitude)
+        ptsy = np.sin(longitude) * np.cos(latitude)
+        ptsz = np.sin(latitude)
+        if self.layer.lower() == 'solar':
+            # Solar shading of surface
+            ptsc = np.copy(ptsx)
+            ptsc[ptsc < 0] = 0
+            in_color = False
+        elif self.layer.lower() == 'abundance':
+            # Source map on surface
+            from inspect import currentframe, getframeinfo
+            frameinfo = getframeinfo(currentframe())
+            print(frameinfo.filename, frameinfo.lineno)
+            from IPython import embed; embed()
+            import sys; sys.exit()
+            
+            sourcemap = pickle.load(open('sourcemap.pkl', 'rb'))
+            longitude, latitude = np.meshgrid(sourcemap['longitude'].value,
+                                              sourcemap['latitude'].value)
+            ptsc = np.zeros_like(longitude)
+            ptsc[:-1, :-1] = sourcemap['abundance'].T
+            ptsc[:, -1] = ptsc[:, 0]
+            ptsc[-1, :] = ptsc[0, :]
+            in_color = True
+        elif self.layer == 'map':
+            # Load in Mercury's surface map
+            mapfile = os.path.join(path, 'data', 'MercurySurface.jpg')
+            mercmap = np.array(Image.open(mapfile))
+            
+            indx = np.interp(latitude.flatten(),
+                             np.linspace(-np.pi/2, np.pi/2, num=mercmap.shape[0],
+                                         endpoint=False),
+                             np.arange(mercmap.shape[0]))
+            indy = np.interp(longitude.flatten(),
+                             np.linspace(0, 2*np.pi, num=mercmap.shape[1],
+                                         endpoint=False),
+                             np.arange(mercmap.shape[1]))
+            ptsc = mercmap[indx.astype(int), indy.astype(int), :].reshape(
+                (*longitude.shape, 3))
+            in_color = True
+        else:
+            print(self.layer)
+            assert 0, 'Not set up'
+
+        # Mercury sphere
+        customdata = np.array([loctime,
+                               np.degrees(longitude),
+                               np.degrees(latitude)])
+        hovertemp = ('Local Time: %{customdata[0]:.1f} hr <br>'
+                     'Longitude: %{customdata[1]:.1f}°<br>'
+                     'Latitude: %{customdata[2]:.1f}°')
+        mercury = go.Surface(name='Mercury',
+                             x=ptsx, y=ptsy, z=ptsz,
+                             customdata=customdata,
+                             hovertemplate=hovertemp,
+                             showscale=False, reversescale=True,
+                             lighting={'diffuse': 1,
+                                       'ambient': 1,
+                                       'specular': 0})
+        
+        if in_color:
+            mercury.update(surfacecolor=ptsc)
+        else:
+            mercury.update(colorscale='Greys',
+                           surfacecolor=ptsc*256/ptsc.max())
+        
+        self.mercury_figure.add_trace(mercury)
+        
+    def orientation_arrows(self):
+        sundir = go.Scatter3d(name='SunDir', x=[0, 4], y=[0, 0], z=[0, 0],
+                              mode='lines', hovertext='To Sun',
+                              hoverinfo='text',
+                              line={'width':5, 'color':'red'}, )
+        duskdir = go.Scatter3d(name='DuskDir', x=[0, 0], y=[0, 4], z=[0, 0],
+                               mode='lines', hovertext='To Dusk',
+                               hoverinfo='text',
+                               line={'width':5, 'color':'green'})
+        northdir = go.Scatter3d(name='NorthDir', x=[0, 0], y=[0, 0], z=[0, 4],
+                                mode='lines', hovertext='To North',
+                                hoverinfo='text',
+                                line={'width':5, 'color':'blue'})
+        
+        self.mercury_figure.add_trace(sundir)
+        self.mercury_figure.add_trace(duskdir)
+        self.mercury_figure.add_trace(northdir)
+
+    def messenger_orbit(self):
+        customdata = np.array([self.mdata.radiance,
+                               self.mdata.alttan,
+                               self.mdata.loctimetan,
+                               self.mdata.lattan * 180 / np.pi]).T
+        hovertemp = ('S/C x, y, z: %{x:.1f}, %{y:.1f}, %{z:.1f} <br>'
+                     'Radiance: %{customdata[0]:.1f} kR<br>'
+                     'Tangent Altitude: %{customdata[1]:.1f} km<br>'
+                     'Tangent Local Time: %{customdata[2]:.1f} hr<br>'
+                     'Tangent Latitude: %{customdata[3]:.1f}°')
+        
+        # Plot the orbit in black
+        times = pd.date_range(self.mdata.utc.min().iso,
+                              self.mdata.utc.max().iso, freq='2min')
+        kernels = SpiceKernels('Mercury')
+        
+        ets = [spice.str2et(t.isoformat()) for t in times]
+        mes_pos, _ = spice.spkpos('MESSENGER', ets, 'MercurySolar', 'NONE',
+                                  'Mercury')
+        
+        mercury = SSObject('Mercury')
+        mes_pos /= mercury.radius.value
+        
+        orbit = go.Scatter3d(name='Orbit', x=mes_pos[:,0], y=mes_pos[:,1],
+                             z=mes_pos[:,2], mode='lines',
+                             line={'color': 'black',
+                                   'width': 3})
+                                 # marker={'color':'black',
+                                 #         'size': 5})
+        self.mercury_figure.add_trace(orbit)
+        self.mercury_figure.update_layout(showlegend=False)
+        
+        kernels.unload()
+     
+    def add_lines_of_sight(self):
+        # Add lines to tangent point
+        lines_of_sight = []
+        hovertemp = ('S/C x, y, z: %{customdata[0]:.1f}, '
+                     '%{customdata[1]:.1f}, %{customdata[2]:.1f} <br>'
+                     'Radiance: %{customdata[3]:.1f} kR<br>'
+                     'Tangent Altitude: %{customdata[4]:.1f} km<br>'
+                     'Tangent Local Time: %{customdata[5]:.1f} hr<br>'
+                     'Tangent Latitude: %{customdata[6]:.1f}°')
+        for i, row in self.mdata.data.iterrows():
+            customdata = np.array([[row.x, row.x],
+                                   [row.y, row.y],
+                                   [row.z, row.z],
+                                   [row.radiance, row.radiance],
+                                   [row.alttan, row.alttan],
+                                   [row.loctimetan, row.loctimetan],
+                                   [row.lattan*180/np.pi, row.lattan*180/np.pi]]).T
+            line_of_sight = go.Scatter3d(name=f'Line of Sight',
+                                         x=[row.x, row.xtan],
+                                         y=[row.y, row.ytan],
+                                         z=[row.z, row.ztan],
+                                         line={'color':[row.radiance, row.radiance],
+                                               'cmin':0,
+                                               'cmax':self.mdata.data.radiance.max(),
+                                               'width':3},
+                                         marker={'color': 'yellow',
+                                                 'size': 1},
+                                         mode='lines',
+                                         customdata=customdata,
+                                         hovertemplate=hovertemp)
+            lines_of_sight.append(line_of_sight)
+            self.mercury_figure.add_trace(line_of_sight)
+            
+        lines_of_sight[0].update(line={'colorbar':{'title':'Radiance (kR)',
+                                       'len':0.75, 'lenmode':'fraction'}})
+        self.mercury_figure.update_layout(showlegend=False)
+    
+    def create_figure(self):
+        pio.templates.default = 'plotly_white'
+    
+        self.mercury_figure = go.Figure(layout={'height': 1000,
+                                                'width': 1000})
+        
+        # Add Mercury sphere
+        self.create_mercury_globe()
+        self.orientation_arrows()
+        self.messenger_orbit()
+        self.add_lines_of_sight()
+        
+        self.mercury_figure.update_layout(
+            {'scene':{'xaxis':{'range':[-4, 4],
+                               'title':'Sunward (R_M)'},
+                      'yaxis':{'range':[-4, 4],
+                               'title':'Duskward (R_M)'},
+                      'zaxis':{'range':[-6, 4],
+                               'title':'Northward (R_M)'},
+                                'aspectratio':{'x':1,
+                                               'y':1,
+                                               'z':1}
+                      }
+             })
+        
+        self.mercury_figure.update_layout(showlegend=False)
+    
+    def create_app(self):
+        title_info = f'''
+# MESSENGER UVVS
+### {self.mdata.species}, {self.mdata.comparisons}
+'''
+        app = dash.Dash(f'MESSENGER UVVS Orbit Viewer',
+                        external_stylesheets = ['https://codepen.io/chriddyp/pen/bWLwgP.css'])
+        
+        app.layout = dash.dash.html.Div([
+            dash.dcc.Markdown(title_info),
+            dash.dcc.Graph(id='OrbitFigure', figure=self.mercury_figure)])
+
+        return app

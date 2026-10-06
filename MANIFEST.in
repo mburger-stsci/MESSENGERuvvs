@@ -1,0 +1,15 @@
+include README.rst
+include CODE_OF_CONDUCT.rst
+
+include setup.cfg
+include MESSENGERuvvs/tests/
+
+recursive-include MESSENGERuvvs *.pyx *.c *.pxd
+recursive-include docs *
+recursive-include licenses *
+
+prune build
+prune docs/_build
+prune docs/api
+
+global-exclude *.pyc *.o
